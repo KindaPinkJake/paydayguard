@@ -405,7 +405,7 @@ function bind(){
   var pfs=g('pfSave');if(pfs)pfs.onclick=()=>{
     var name=(g('pfName').value||'').trim(),amt=parseFloat(g('pfAmt').value),acct=g('pfAcct').value||'chime';
     var nextDate=g('pfDate').value||'',freq=g('pfFreq').value||'biweekly';
-    if(!name||isNaN(amt)||amt<=0)return;
+    if(!name||isNaN(amt)||amt<=0||!nextDate)return;
     if(S.editPc){S.paychecks=S.paychecks.map(p=>p.id===S.editPc?{id:S.editPc,name,amt:Math.round(amt*100)/100,account:acct,nextDate,freq}:p)}
     else{S.paychecks=S.paychecks.concat([{id:uid(),name,amt:Math.round(amt*100)/100,account:acct,nextDate,freq}])}
     S.pcForm=false;S.editPc=null;save();render();
