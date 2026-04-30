@@ -182,7 +182,14 @@ function bind(){
   document.querySelectorAll('[data-fc]').forEach(el=>el.onclick=()=>{S.filt=el.dataset.fc;render()});
   document.querySelectorAll('[data-dt]').forEach(el=>el.onclick=()=>{var t=S.txns.find(x=>x.id===el.dataset.dt);if(!t)return;S.bal=Math.round((S.bal-t.amt)*100)/100;S.txns=S.txns.filter(x=>x.id!==el.dataset.dt);save();render()});
 }
+const OWNER_UID='4aM94bSgSKc1yCvi4LaNOO4LnOH3';
 onAuthStateChanged(auth,async user=>{
+  if(user&&user.uid!==OWNER_UID){
+    await signOut(auth);
+    document.getElementById('nav').style.display='none';
+    document.getElementById('content').innerHTML='<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;gap:16px"><p style="font-size:32px">🔒</p><p style="font-size:20px;font-weight:600">Private app</p><p style="font-size:14px;color:var(--tx2)">This app is private and not accepting new users.</p></div>';
+    return;
+  }
   U=user;
   if(user){
     Object.assign(S,{bal:0,hsa:0,payday:'',pc:{amt:0},bills:[],txns:[],cats:null,loans:[],view:'home',billForm:false,editBill:null,txForm:false,txType:'expense',pcForm:false,catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],pcDis:false});
