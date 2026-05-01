@@ -116,13 +116,24 @@ function startListener(){
       S.merchantMemory=d.merchantMemory||{};
     }
     render();
-    // One-time migration: fix any income transactions that were imported as negative
+    // One-time migration: fix income transactions on first load
     if(firstLoad){
-      var hadBadIncome=S.txns.some(t=>t.txType==='income'&&t.amt<0);
-      if(hadBadIncome){
-        S.txns=S.txns.map(t=>t.txType==='income'&&t.amt<0?{...t,amt:Math.abs(t.amt)}:t);
-        save();
-      }
+      var changed=false;
+      // Fix transactions tagged as income but stored negative
+      S.txns=S.txns.map(t=>{
+        if(t.txType==='income'&&t.amt<0){changed=true;return{...t,amt:Math.abs(t.amt)};}
+        return t;
+      });
+      // Fix transactions from Chime that match paycheck descriptions but are negative and untagged
+      var pcWords=S.paychecks.filter(p=>p.account==='chime').map(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
+      S.txns=S.txns.map(t=>{
+        if(t.amt>=0||(t.account&&t.account!=='chime')||t.txType)return t;
+        var descLow=(t.desc||'').toLowerCase();
+        var isPaycheck=pcWords.some(words=>words.some(w=>descLow.includes(w)));
+        if(isPaycheck){changed=true;return{...t,amt:Math.abs(t.amt),txType:'income'};}
+        return t;
+      });
+      if(changed)save();
     }
     // Auto-sync with Teller on first load if connected
     if(firstLoad&&S.tellerToken&&S.tellerAccountId){
@@ -185,7 +196,7 @@ async function tellerSync(){
         if(!t.tellerId)return t;
         var raw=txData.transactions.find(r=>r.id===t.tellerId);
         if(!raw)return t;
-        var isCredit=raw.type==='credit';
+        var isCredit=raw.type==='credit'||parseFloat(raw.amount||0)<0;
         if(isCredit&&t.amt<0){
           return{...t,amt:Math.abs(t.amt),txType:'income',cat:undefined};
         }
@@ -196,8 +207,9 @@ async function tellerSync(){
       });
       // Only import transactions we haven't seen before (by Teller ID)
       var newTxns=txData.transactions.filter(t=>!existing.has(t.id)).map(t=>{
-        var isCredit=t.type==='credit';
-        var amt=isCredit?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount));
+        var rawAmt=parseFloat(t.amount||0);
+        var isCredit=t.type==='credit'||rawAmt<0; // Teller credits can appear as negative amounts
+        var amt=isCredit?Math.abs(rawAmt):-Math.abs(rawAmt);
         var desc=t.description||t.details?.counterparty?.name||'Chime transaction';
         var tx={id:uid(),tellerId:t.id,desc,amt,date:t.date,account:'chime'};
         if(isCredit){tx.txType='income';}
@@ -898,6 +910,9 @@ function loanForm(){
 function historyView(){
   var cats=gc();
   var txns=S.txns;
+  // Hide savings transfer transactions by default — only show when filtering Chime Savings
+  var showSavings=S.filtAcct==='chimeSavings';
+  if(!showSavings) txns=txns.filter(t=>t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal');
   // Account filter
   if(S.filtAcct&&S.filtAcct!=='all') txns=txns.filter(t=>(t.account||'chime')===S.filtAcct);
   // Date filter
