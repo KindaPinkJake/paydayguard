@@ -57,7 +57,7 @@ var S={
   view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,
   txForm:false,txType:'expense',txAcct:'chime',
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
-  filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,
+  filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
   shareToken:null,showSharePanel:false,
   tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,
   billAssignTxId:null,editTx:null,
@@ -117,10 +117,12 @@ function startListener(){
     }
     render();
     // One-time migration: fix any income transactions that were imported as negative
-    var hadBadIncome=S.txns.some(t=>t.txType==='income'&&t.amt<0);
-    if(hadBadIncome){
-      S.txns=S.txns.map(t=>t.txType==='income'&&t.amt<0?{...t,amt:Math.abs(t.amt)}:t);
-      save();
+    if(firstLoad){
+      var hadBadIncome=S.txns.some(t=>t.txType==='income'&&t.amt<0);
+      if(hadBadIncome){
+        S.txns=S.txns.map(t=>t.txType==='income'&&t.amt<0?{...t,amt:Math.abs(t.amt)}:t);
+        save();
+      }
     }
     // Auto-sync with Teller on first load if connected
     if(firstLoad&&S.tellerToken&&S.tellerAccountId){
@@ -173,7 +175,7 @@ async function tellerSync(){
       if(savBalData.balance){S.chimeSavingsBal=Math.round((parseFloat(savBalData.balance.available||savBalData.balance.ledger||0))*100)/100;}
     }
 
-    // Fetch checking transactions (90 days)
+    // Fetch checking transactions (500 most recent)
     var txRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId,count:500})});
     var txData=await txRes.json();
     if(txData.transactions&&txData.transactions.length){
@@ -185,7 +187,6 @@ async function tellerSync(){
         if(!raw)return t;
         var isCredit=raw.type==='credit';
         if(isCredit&&t.amt<0){
-          // Was incorrectly imported as negative — fix it
           return{...t,amt:Math.abs(t.amt),txType:'income',cat:undefined};
         }
         if(isSavingsTransfer(t.desc)&&t.txType!=='savings_transfer'){
@@ -193,6 +194,7 @@ async function tellerSync(){
         }
         return t;
       });
+      // Only import transactions we haven't seen before (by Teller ID)
       var newTxns=txData.transactions.filter(t=>!existing.has(t.id)).map(t=>{
         var isCredit=t.type==='credit';
         var amt=isCredit?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount));
@@ -645,7 +647,22 @@ function savingsCard(){
       </div>`;
     }).join('')}
   </div>`:''}
-  ${unallocated>0?`<p style="font-size:12px;color:var(--tx2);margin-bottom:8px">Unallocated: ${fm(unallocated)}</p>`:''}
+  ${unallocated>0?`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+    <div><p style="font-size:12px;color:var(--tx2)">Unallocated</p><p class="mono" style="font-size:14px;font-weight:500">${fm(unallocated)}</p></div>
+    ${S.savingsGoals.length?`<button class="btn" id="savings-allocate-btn" style="font-size:11px;padding:4px 10px;color:var(--tx-ok);border-color:var(--bd-ok)">Move to goal →</button>`:''}
+  </div>
+  ${S.showAllocate?`<div style="margin-bottom:8px;padding:12px;background:var(--bg2);border-radius:8px">
+    <label style="margin-bottom:6px">Amount to move</label>
+    <input class="field mono" id="allocate-amt-inp" type="number" step="0.01" min="0.01" max="${unallocated}" placeholder="0.00" style="margin-bottom:8px">
+    <label style="margin-bottom:6px">Move to which goal?</label>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+      ${S.savingsGoals.map(g=>`<button data-allocate-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.allocateGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.saved)}</span></button>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="allocate-save" style="flex:1;font-weight:500;color:var(--tx-ok);border-color:var(--bd-ok)">Move</button>
+      <button class="btn" id="allocate-cancel" style="flex:1">Cancel</button>
+    </div>
+  </div>`:''}`:''}
   ${depositForm}${withdrawForm}
   </div>`;
 }
@@ -941,7 +958,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1033,6 +1050,18 @@ function bind(){
     S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;save();render();
   };
   var asCancel=g('savings-amt-cancel');if(asCancel)asCancel.onclick=()=>{S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;render()};
+
+  // Move unallocated to goal
+  var salBtn=g('savings-allocate-btn');if(salBtn)salBtn.onclick=()=>{S.showAllocate=!S.showAllocate;S.allocateGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
+  document.querySelectorAll('[data-allocate-goal]').forEach(el=>el.onclick=()=>{S.allocateGoalId=el.dataset.allocateGoal;render()});
+  var allocSave=g('allocate-save');if(allocSave)allocSave.onclick=()=>{
+    var v=parseFloat((g('allocate-amt-inp')||{}).value);
+    var goalId=S.allocateGoalId;
+    if(isNaN(v)||v<=0||!goalId)return;
+    S.savingsGoals=S.savingsGoals.map(g=>g.id===goalId?{...g,saved:Math.round((g.saved+v)*100)/100}:g);
+    S.showAllocate=false;S.allocateGoalId=null;save();render();
+  };
+  var allocCancel=g('allocate-cancel');if(allocCancel)allocCancel.onclick=()=>{S.showAllocate=false;S.allocateGoalId=null;render()};
 
   // Savings goals CRUD
   var agb=g('addGoalBtn');if(agb)agb.onclick=()=>{S.goalForm=true;S.editGoal=null;render()};
@@ -1172,7 +1201,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{}});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{}});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
