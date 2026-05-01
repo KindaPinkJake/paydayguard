@@ -91,6 +91,7 @@ function getPayday(){
   if(!chimeChecks.length)return'';
   return chimeChecks.map(p=>p.nextDate).sort()[0];
 }
+function startListener(){
   if(unsub)unsub();
   unsub=onSnapshot(doc(db,'users',U.uid,'data','main'),snap=>{
     if(snap.exists()){
