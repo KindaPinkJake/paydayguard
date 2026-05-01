@@ -584,7 +584,6 @@ function bind(){
 }
 
 onAuthStateChanged(auth,async user=>{
-  if(false){
   U=user;
   if(user){
     Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false});
