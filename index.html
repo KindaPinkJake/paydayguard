@@ -41,9 +41,9 @@ nav button.active{color:var(--tx);font-weight:500;border-top-color:var(--tx)}
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import{getAuth,GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import{getFirestore,doc,onSnapshot,setDoc,getDoc,deleteDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{initializeFirestore,persistentLocalCache,doc,onSnapshot,setDoc,getDoc,deleteDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 const fb=initializeApp({apiKey:"AIzaSyABQvIcpgyTQg4_-rtw_zfxrOSB5ypg0vA",authDomain:"paydayguard.firebaseapp.com",projectId:"paydayguard",storageBucket:"paydayguard.firebasestorage.app",messagingSenderId:"801514317764",appId:"1:801514317764:web:35ee6daae70af0a31fa691"});
-const auth=getAuth(fb),db=getFirestore(fb);
+const auth=getAuth(fb),db=initializeFirestore(fb,{localCache:persistentLocalCache()});
 
 var COLORS={warning:{bg:'var(--bg-warn)',c:'var(--tx-warn)'},info:{bg:'var(--bg-info)',c:'var(--tx-info)'},success:{bg:'var(--bg-ok)',c:'var(--tx-ok)'},danger:{bg:'var(--bg-err)',c:'var(--tx-err)'},secondary:{bg:'var(--bg2)',c:'var(--tx2)'}};
 var DEFCATS=[{id:'food',label:'Food & Dining',color:'warning',budgetPct:0},{id:'gas',label:'Gas & Transport',color:'info',budgetPct:0},{id:'entertain',label:'Entertainment',color:'success',budgetPct:0},{id:'health',label:'Health & Medical',color:'danger',budgetPct:0},{id:'other',label:'Other',color:'secondary',budgetPct:0}];
@@ -105,7 +105,7 @@ function startListener(){
       S.bal=d.bal||0;S.hsa=d.hsa||0;S.chimeSavingsBal=d.chimeSavingsBal||0;
       S.paychecks=d.paychecks||[];S.bills=d.bills||[];S.txns=d.txns||[];
       S.cats=d.cats||null;S.loans=d.loans||[];
-      S.savingsGoals=d.savingsGoals||(d.savingsGoal&&d.savingsGoal.name?[{id:uid(),name:d.savingsGoal.name,target:d.savingsGoal.amount||0,allocated:d.savingsTotal||d.allocated||0,budgetPct:d.savingsPct||0}]:[]);
+      S.savingsGoals=(d.savingsGoals||(d.savingsGoal&&d.savingsGoal.name?[{id:uid(),name:d.savingsGoal.name,target:d.savingsGoal.amount||0,allocated:d.savingsTotal||0,budgetPct:d.savingsPct||0}]:[])).map(g=>({...g,allocated:g.allocated!==undefined?g.allocated:(g.saved||0)}));
       S.envelopes=d.envelopes||{};
       S.lastPaycheckDate=d.lastPaycheckDate||'';
       S.tellerToken=d.tellerToken||null;
