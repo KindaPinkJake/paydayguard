@@ -60,7 +60,7 @@ var S={
   filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,
   shareToken:null,showSharePanel:false,
   tellerToken:null,tellerAccountId:null,tellerSyncing:false,tellerLastSync:null,
-  billAssignTxId:null
+  billAssignTxId:null,editTx:null
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -110,6 +110,7 @@ function startListener(){
       S.tellerToken=d.tellerToken||null;
       S.tellerAccountId=d.tellerAccountId||null;
       S.tellerLastSync=d.tellerLastSync||null;
+      S.shareToken=d.shareToken||null;
     }
     render();
   },e=>console.error(e));
@@ -118,7 +119,7 @@ function save(){
   if(!U)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsPct:S.savingsPct,savingsGoal:S.savingsGoal,savingsTotal:S.savingsTotal,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerLastSync:S.tellerLastSync})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsPct:S.savingsPct,savingsGoal:S.savingsGoal,savingsTotal:S.savingsTotal,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -158,14 +159,14 @@ async function tellerSync(){
       var existing=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
       var newTxns=txData.transactions
         .filter(t=>!existing.has(t.id))
-        .map(t=>({
-          id:uid(),
-          tellerId:t.id,
-          desc:t.description||t.details?.counterparty?.name||'Chime transaction',
-          amt:t.type==='credit'?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount)),
-          date:t.date,
-          account:'chime'
-        }));
+        .map(t=>{
+          var isCredit=t.type==='credit';
+          var amt=isCredit?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount));
+          var tx={id:uid(),tellerId:t.id,desc:t.description||t.details?.counterparty?.name||'Chime transaction',amt,date:t.date,account:'chime'};
+          // Auto-tag credits as income so they don't need categorization
+          if(isCredit)tx.txType='income';
+          return tx;
+        });
       if(newTxns.length)S.txns=newTxns.concat(S.txns);
     }
     S.tellerLastSync=new Date().toISOString();
@@ -203,6 +204,8 @@ function openTellerConnect(){
 
 function upcoming(){
   var pd=getPayday();
+  if(!pd)return[];
+  var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');
   return S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd}).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
 }
 function safe(){return S.bal-upcoming().reduce((s,b)=>s+b.amt,0)}
@@ -249,7 +252,7 @@ function sharedView(d){
   var up=[];
   if(pd){var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');up=bills.filter(b=>{var dd=new Date(b.nextDue+'T00:00:00');return dd>=now&&dd<=pdd}).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));}
   var sf=d.bal-up.reduce((s,b)=>s+b.amt,0);
-  var dy=pd?Math.ceil((new Date(pd+'T00:00:00')-new Date().setHours(0,0,0,0))/86400000):null;
+  var dy=pd?(function(){var now=new Date();now.setHours(0,0,0,0);return Math.ceil((new Date(pd+'T00:00:00')-now)/86400000)})():null;
   var lv=pd?(sf<0?'danger':sf<150?'warning':'safe'):'safe';
   var st=ls(lv);
   var tot=up.reduce((s,b)=>s+b.amt,0);
@@ -319,7 +322,7 @@ function loginScreen(){
 }
 
 function firstUncategorized(){
-  return S.txns.find(t=>t.amt<0&&!t.cat&&t.account==='chime')||null;
+  return S.txns.find(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit')||null;
 }
 
 function banners(){
@@ -645,7 +648,41 @@ function historyView(){
   </div></div>
   ${!filtered.length
     ?`<div style="text-align:center;padding:2rem;color:var(--tx2);font-size:14px;border:1px dashed var(--bd);border-radius:12px">No transactions${S.filt!=='all'?' in this category':' yet'}.</div>`
-    :`<div style="display:flex;flex-direction:column;gap:6px">${filtered.map(t=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="flex:1;min-width:0;margin-right:10px"><p style="font-size:14px;margin-bottom:3px">${t.desc}</p><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${t.cat?ttag(t.cat):''}${acctTag(t.account||'chime')}<span style="font-size:11px;color:var(--tx2)">${fd(t.date)}</span></div></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0"><p class="mono" style="font-size:15px;font-weight:500;color:${t.amt<0?'var(--tx-err)':'var(--tx-ok)'}">${t.amt>=0?'+':''}${fm(t.amt)}</p><button class="btn" data-dt="${t.id}" style="font-size:12px;padding:3px 8px;color:var(--tx2);min-height:0">x</button></div></div></div>`).join('')}</div>`}
+    :`<div style="display:flex;flex-direction:column;gap:6px">${filtered.map(t=>{
+      var isEditing=S.editTx===t.id;
+      var isExp=t.amt<0;
+      return`<div style="background:var(--bg);border:1px solid ${isEditing?'var(--bd2)':'var(--bd)'};border-radius:8px;padding:10px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1;min-width:0;margin-right:10px">
+            <p style="font-size:14px;margin-bottom:3px">${t.desc}</p>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${t.cat?ttag(t.cat):''}${acctTag(t.account||'chime')}<span style="font-size:11px;color:var(--tx2)">${fd(t.date)}</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <p class="mono" style="font-size:15px;font-weight:500;color:${isExp?'var(--tx-err)':'var(--tx-ok)'}">${t.amt>=0?'+':''}${fm(t.amt)}</p>
+            <button class="btn" data-et="${t.id}" style="font-size:11px;padding:3px 8px;color:var(--tx2);min-height:0">${isEditing?'↑':'Edit'}</button>
+            <button class="btn" data-dt="${t.id}" style="font-size:11px;padding:3px 8px;color:var(--tx2);min-height:0">✕</button>
+          </div>
+        </div>
+        ${isEditing?`<div style="margin-top:10px;border-top:1px solid var(--bd);padding-top:10px;display:flex;flex-direction:column;gap:8px">
+          <input class="field" id="et-desc" type="text" value="${t.desc.replace(/"/g,'&quot;')}" placeholder="Description">
+          <div style="display:flex;gap:8px">
+            <input class="field mono" id="et-amt" type="number" step="0.01" min="0" value="${Math.abs(t.amt)}" style="flex:1">
+            <input class="field" id="et-date" type="date" value="${t.date}" style="flex:1">
+          </div>
+          <div style="display:flex;gap:8px">
+            <select class="field" id="et-acct" style="flex:1">
+              <option value="chime"${(t.account||'chime')==='chime'?' selected':''}>Chime</option>
+              <option value="hsa"${t.account==='hsa'?' selected':''}>HSA</option>
+            </select>
+            ${isExp?`<select class="field" id="et-cat" style="flex:1"><option value="">No category</option>${cats.map(c=>`<option value="${c.id}"${t.cat===c.id?' selected':''}>${c.label}</option>`).join('')}</select>`:''}
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" data-et-save="${t.id}" data-et-oldamt="${t.amt}" data-et-oldacct="${t.account||'chime'}" style="flex:1;font-weight:500">Save</button>
+            <button class="btn" data-et-cancel style="flex:1">Cancel</button>
+          </div>
+        </div>`:''}
+      </div>`;
+    }).join('')}</div>`}
   </div>`;
 }
 
@@ -660,7 +697,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -812,6 +849,29 @@ function bind(){
   };
   var txX=g('txX');if(txX)txX.onclick=()=>{S.txForm=false;S.txType='expense';S.txAcct='chime';render()};
   document.querySelectorAll('[data-fc]').forEach(el=>el.onclick=()=>{S.filt=el.dataset.fc;render()});
+  document.querySelectorAll('[data-et]').forEach(el=>el.onclick=()=>{S.editTx=S.editTx===el.dataset.et?null:el.dataset.et;render()});
+  document.querySelectorAll('[data-et-cancel]').forEach(el=>el.onclick=()=>{S.editTx=null;render()});
+  document.querySelectorAll('[data-et-save]').forEach(el=>el.onclick=()=>{
+    var tid=el.dataset.etSave;
+    var oldAmt=parseFloat(el.dataset.etOldamt);
+    var oldAcct=el.dataset.etOldacct;
+    var desc=(g('et-desc').value||'').trim();
+    var amt=parseFloat(g('et-amt').value);
+    var date=g('et-date').value||tod();
+    var acct=g('et-acct').value||'chime';
+    var catEl=g('et-cat'),cat=catEl?catEl.value||null:null;
+    if(!desc||isNaN(amt)||amt<=0)return;
+    var t=S.txns.find(x=>x.id===tid);if(!t)return;
+    var isExp=t.amt<0;
+    var newAmt=isExp?-Math.abs(amt):Math.abs(amt);
+    // Only update category for regular expenses (not bill payments, savings, income)
+    var newCat=isExp&&!t.isBillPayment&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'?(cat||null):t.cat;
+    // Reverse old balance effect, apply new
+    adjAcct(oldAcct,-oldAmt);
+    adjAcct(acct,newAmt);
+    S.txns=S.txns.map(x=>x.id===tid?{...x,desc,amt:newAmt,date,account:acct,cat:newCat}:x);
+    S.editTx=null;save();render();
+  });
   document.querySelectorAll('[data-dt]').forEach(el=>el.onclick=()=>{
     var t=S.txns.find(x=>x.id===el.dataset.dt);if(!t)return;
     adjAcct(t.account||'chime',-t.amt);
@@ -842,7 +902,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null});
+    Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
