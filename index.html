@@ -51,15 +51,15 @@ var FREQ=['weekly','biweekly','monthly','annually'];
 var U=null,T=null,unsub=null;
 
 var S={
-  bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],
+  bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],
   savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,
   envelopes:{},lastPaycheckDate:'',
   view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,
   txForm:false,txType:'expense',txAcct:'chime',
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
-  filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,
+  filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,
   shareToken:null,showSharePanel:false,
-  tellerToken:null,tellerAccountId:null,tellerSyncing:false,tellerLastSync:null,
+  tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,
   billAssignTxId:null,editTx:null
 };
 
@@ -74,10 +74,10 @@ function advMonth(d){var day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+1)
 function adv(b){var d=new Date(b.nextDue+'T00:00:00');if(b.rec==='weekly')d.setDate(d.getDate()+7);else if(b.rec==='biweekly')d.setDate(d.getDate()+14);else if(b.rec==='monthly')advMonth(d);else if(b.rec==='annually')d.setFullYear(d.getFullYear()+1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function advPc(p){var d=new Date(p.nextDate+'T00:00:00');if(p.freq==='weekly')d.setDate(d.getDate()+7);else if(p.freq==='biweekly')d.setDate(d.getDate()+14);else if(p.freq==='monthly')advMonth(d);else if(p.freq==='annually')d.setFullYear(d.getFullYear()+1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 
-function getAcctBal(a){return a==='hsa'?S.hsa:S.bal}
-function adjAcct(a,d){var v=Math.round((getAcctBal(a)+d)*100)/100;if(a==='hsa')S.hsa=v;else S.bal=v;}
-function acctLabel(a){return a==='hsa'?'HSA':'Chime'}
-function acctTag(a){var c=a==='hsa'?'var(--tx-info)':'var(--tx-ok)';return`<span class="tag" style="background:transparent;color:${c};border:1px solid ${c}">${acctLabel(a)}</span>`}
+function getAcctBal(a){return a==='hsa'?S.hsa:a==='chimeSavings'?S.chimeSavingsBal:S.bal}
+function adjAcct(a,d){var v=Math.round((getAcctBal(a)+d)*100)/100;if(a==='hsa')S.hsa=v;else if(a==='chimeSavings')S.chimeSavingsBal=v;else S.bal=v;}
+function acctLabel(a){return a==='hsa'?'HSA':a==='chimeSavings'?'Chime Savings':'Chime'}
+function acctTag(a){var c=a==='hsa'?'var(--tx-info)':a==='chimeSavings'?'var(--tx-ok)':'var(--tx-ok)';return`<span class="tag" style="background:transparent;color:${c};border:1px solid ${c}">${acctLabel(a)}</span>`}
 
 function spentSince(catId){
   if(!S.lastPaycheckDate)return 0;
@@ -99,7 +99,7 @@ function startListener(){
   unsub=onSnapshot(doc(db,'users',U.uid,'data','main'),snap=>{
     if(snap.exists()){
       var d=snap.data();
-      S.bal=d.bal||0;S.hsa=d.hsa||0;
+      S.bal=d.bal||0;S.hsa=d.hsa||0;S.chimeSavingsBal=d.chimeSavingsBal||0;
       S.paychecks=d.paychecks||[];S.bills=d.bills||[];S.txns=d.txns||[];
       S.cats=d.cats||null;S.loans=d.loans||[];
       S.savingsPct=d.savingsPct||0;
@@ -109,6 +109,7 @@ function startListener(){
       S.lastPaycheckDate=d.lastPaycheckDate||'';
       S.tellerToken=d.tellerToken||null;
       S.tellerAccountId=d.tellerAccountId||null;
+      S.tellerSavingsAccountId=d.tellerSavingsAccountId||null;
       S.tellerLastSync=d.tellerLastSync||null;
       S.shareToken=d.shareToken||null;
     }
@@ -119,7 +120,7 @@ function save(){
   if(!U)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsPct:S.savingsPct,savingsGoal:S.savingsGoal,savingsTotal:S.savingsTotal,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsPct:S.savingsPct,savingsGoal:S.savingsGoal,savingsTotal:S.savingsTotal,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerSavingsAccountId:S.tellerSavingsAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -145,30 +146,98 @@ async function tellerSync(){
   if(!S.tellerToken||!S.tellerAccountId)return;
   S.tellerSyncing=true;render();
   try{
-    // Fetch balance
+    // Sync checking balance
     var balRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId})});
     var balData=await balRes.json();
-    if(balData.balance){
-      var newBal=parseFloat(balData.balance.available||balData.balance.ledger||0);
-      S.bal=Math.round(newBal*100)/100;
+    if(balData.balance){S.bal=Math.round((parseFloat(balData.balance.available||balData.balance.ledger||0))*100)/100;}
+
+    // Sync savings balance if connected
+    if(S.tellerSavingsAccountId){
+      var savBalRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerSavingsAccountId})});
+      var savBalData=await savBalRes.json();
+      if(savBalData.balance){S.chimeSavingsBal=Math.round((parseFloat(savBalData.balance.available||savBalData.balance.ledger||0))*100)/100;}
     }
-    // Fetch transactions
-    var txRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId})});
+
+    // Fetch checking transactions (90 days)
+    var txRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId,count:500})});
     var txData=await txRes.json();
     if(txData.transactions&&txData.transactions.length){
       var existing=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
-      var newTxns=txData.transactions
-        .filter(t=>!existing.has(t.id))
-        .map(t=>{
+      // Fix existing Teller transactions that were misclassified before income detection was added
+      S.txns=S.txns.map(t=>{
+        if(!t.tellerId)return t;
+        var raw=txData.transactions.find(r=>r.id===t.tellerId);
+        if(!raw)return t;
+        var isCredit=raw.type==='credit';
+        if(isCredit&&t.amt<0){
+          // Was incorrectly imported as negative — fix it
+          return{...t,amt:Math.abs(t.amt),txType:'income',cat:undefined};
+        }
+        if(isSavingsTransfer(t.desc)&&t.txType!=='savings_transfer'){
+          return{...t,txType:'savings_transfer'};
+        }
+        return t;
+      });
+      var newTxns=txData.transactions.filter(t=>!existing.has(t.id)).map(t=>{
+        var isCredit=t.type==='credit';
+        var amt=isCredit?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount));
+        var desc=t.description||t.details?.counterparty?.name||'Chime transaction';
+        var tx={id:uid(),tellerId:t.id,desc,amt,date:t.date,account:'chime'};
+        if(isCredit){tx.txType='income';}
+        else if(isSavingsTransfer(desc)){tx.txType='savings_transfer';}
+        else{
+          var suggested=suggestCategory(desc);
+          if(suggested)tx.suggestedCat=suggested;
+        }
+        return tx;
+      });
+      if(newTxns.length)S.txns=newTxns.concat(S.txns);
+
+      // Auto-apply paycheck matches
+      newTxns.filter(t=>t.txType==='income').forEach(t=>{
+        var matched=S.paychecks.find(p=>{
+          if(p.account!=='chime')return false;
+          // Description match: any word from paycheck name appears in transaction desc
+          var pWords=p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2);
+          var descLow=t.desc.toLowerCase();
+          var descMatch=pWords.some(w=>descLow.includes(w));
+          // Amount match: within $50
+          var amtMatch=Math.abs(t.amt-p.amt)<=50;
+          return descMatch&&amtMatch;
+        });
+        if(matched&&t.date>=matched.nextDate){
+          // Fund envelopes from safe-to-spend at time of paycheck
+          var sts=S.bal-upcoming().reduce((s,b)=>s+b.amt,0);
+          var cats=gc(),newEnv={};
+          cats.forEach(c=>{newEnv[c.id]=Math.round(sts*(c.budgetPct||0)*100)/100});
+          var savAmt=Math.round(sts*(S.savingsPct||0)*100)/100;
+          newEnv['__savings']=savAmt;
+          S.envelopes=newEnv;
+          if(!S.tellerSavingsAccountId)S.savingsTotal=Math.round((S.savingsTotal+savAmt)*100)/100;
+          S.lastPaycheckDate=t.date;
+          // Advance paycheck nextDate
+          S.paychecks=S.paychecks.map(p=>p.id===matched.id?{...p,nextDate:advPc(p)}:p);
+          console.log('Auto-applied paycheck:',matched.name,'on',t.date);
+        }
+      });
+    }
+
+    // Fetch savings transactions (90 days)
+    if(S.tellerSavingsAccountId){
+      var savTxRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerSavingsAccountId,count:500})});
+      var savTxData=await savTxRes.json();
+      if(savTxData.transactions&&savTxData.transactions.length){
+        var existingSav=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
+        var newSavTxns=savTxData.transactions.filter(t=>!existingSav.has(t.id)).map(t=>{
           var isCredit=t.type==='credit';
           var amt=isCredit?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount));
-          var tx={id:uid(),tellerId:t.id,desc:t.description||t.details?.counterparty?.name||'Chime transaction',amt,date:t.date,account:'chime'};
-          // Auto-tag credits as income so they don't need categorization
-          if(isCredit)tx.txType='income';
-          return tx;
+          var desc=t.description||'Savings transfer';
+          return{id:uid(),tellerId:t.id,desc,amt,date:t.date,account:'chimeSavings',txType:'savings_transfer'};
         });
-      if(newTxns.length)S.txns=newTxns.concat(S.txns);
+        if(newSavTxns.length)S.txns=newSavTxns.concat(S.txns);
+      }
     }
+
     S.tellerLastSync=new Date().toISOString();
     save();
   }catch(e){console.error('Teller sync error',e)}
@@ -183,36 +252,23 @@ function openTellerConnect(){
       applicationId:'app_prp572s7pk1512s5r6000',
       onSuccess:async function(enrollment){
         S.tellerToken=enrollment.accessToken;
-        // Try to find the checking account ID
         try{
           var res=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:enrollment.accessToken})});
           var data=await res.json();
-          console.log('Teller accounts response:',data);
           if(data.accounts&&data.accounts.length){
-            var checking=data.accounts.find(a=>a.subtype==='checking')||data.accounts[0];
-            S.tellerAccountId=checking.id;
-            console.log('Using account:',checking.name,checking.id);
-          }else{
-            // Teller may return accountId directly in enrollment
-            if(enrollment.enrollment&&enrollment.enrollment.accounts&&enrollment.enrollment.accounts.length){
-              S.tellerAccountId=enrollment.enrollment.accounts[0].id;
-              console.log('Got account from enrollment:',S.tellerAccountId);
-            }
+            var checking=data.accounts.find(a=>a.subtype==='checking')||data.accounts.find(a=>a.type==='depository')||data.accounts[0];
+            var savings=data.accounts.find(a=>a.subtype==='savings');
+            if(checking)S.tellerAccountId=checking.id;
+            if(savings)S.tellerSavingsAccountId=savings.id;
           }
         }catch(e){
           console.error('getAccounts failed:',e);
-          // Try to get account from enrollment object directly
           if(enrollment.enrollment&&enrollment.enrollment.accounts){
             S.tellerAccountId=enrollment.enrollment.accounts[0]?.id||null;
           }
         }
         save();
-        if(S.tellerAccountId){
-          await tellerSync();
-        }else{
-          console.error('Could not determine account ID. Enrollment object:',JSON.stringify(enrollment));
-          render();
-        }
+        await tellerSync();
       },
       onExit:function(){render()}
     });
@@ -232,8 +288,11 @@ function safe(){return S.bal-upcoming().reduce((s,b)=>s+b.amt,0)}
 function days(){var pd=getPayday();if(!pd)return null;var now=new Date();now.setHours(0,0,0,0);return Math.ceil((new Date(pd+'T00:00:00')-now)/86400000)}
 function showLevel(v){if(!getPayday())return'safe';return v<0?'danger':v<150?'warning':'safe'}
 function ls(l){return{danger:{c:'var(--tx-err)',bg:'var(--bg-err)',br:'var(--bd-err)'},warning:{c:'var(--tx-warn)',bg:'var(--bg-warn)',br:'var(--bd-warn)'},safe:{c:'var(--tx-ok)',bg:'var(--bg-ok)',br:'var(--bd-ok)'}}[l]}
-function billsToday(){var t=tod();return S.bills.filter(b=>b.nextDue===t&&!S.disBills.includes(b.id))}
-function pcsToday(){var t=tod();return S.paychecks.filter(p=>p.nextDate===t&&!S.disPcs.includes(p.id))}
+function billsToday(){return[]} // Bills handled via Teller transaction categorization
+function pcsToday(){
+  if(S.tellerToken&&S.tellerAccountId)return[]; // Teller handles paycheck detection automatically
+  var t=tod();return S.paychecks.filter(p=>p.nextDate===t&&!S.disPcs.includes(p.id));
+}
 
 function ttag(cat){if(!cat)return'';var c=gcat(cat),cl=co(c.color);return`<span class="tag" style="background:${cl.bg};color:${cl.c}">${c.label}</span>`}
 function swatch(k,sel){var cl=co(k);return`<button type="button" data-swatch="${k}" style="width:32px;height:32px;border-radius:50%;background:${cl.bg};border:${sel?'3px solid '+cl.c:'1px solid var(--bd)'};cursor:pointer;flex-shrink:0"></button>`}
@@ -341,8 +400,51 @@ function loginScreen(){
   return`<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;gap:24px"><div><p style="font-size:32px;margin-bottom:8px">💰</p><p style="font-size:24px;font-weight:600;margin-bottom:8px">PaydayGuard</p><p style="font-size:14px;color:var(--tx2)">Know if you'll make it to payday</p></div><button id="gsign" style="display:flex;align-items:center;gap:12px;padding:12px 24px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);cursor:pointer;font-size:15px;font-weight:500;color:var(--tx)"><svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Sign in with Google</button><p style="font-size:12px;color:var(--tx2);max-width:260px">Your data syncs privately across all your devices.</p></div>`;
 }
 
+// Merchant keyword hints → which category label to prefer
+var MERCHANT_HINTS=[
+  {words:['uber','lyft','taxi','cab '],label:'uber'},
+  {words:['mcdonald','burger king','wendy','taco bell','chipotle','subway','starbucks','dunkin','pizza','domino','papa john','kfc','chick-fil','popeye','sonic','arby','dairy queen','olive garden','applebee','ihop','denny','panera','chili','buffalo wild','panda','doordash','grubhub','postmate','uber eat','restaurant','dining','cafe','bakery','deli'],label:'food'},
+  {words:['safeway','kroger','albertson','whole food','trader joe','sprout','aldi','costco','sam\'s club','walmart','fred meyer','winco','grocery','market'],label:'grocer'},
+  {words:['shell','chevron','exxon','mobil','bp ','arco','76 ','texaco','sunoco','marathon','phillips','valero','kwik trip','casey','wawa','speedway','circle k','7-eleven','pilot','flying j','loves ','gas station','fuel'],label:'gas'},
+  {words:['netflix','spotify','hulu','disney','apple tv','paramount','peacock','hbo','amazon prime','youtube','twitch','steam','playstation','xbox','nintendo','ticketmaster','stubhub','amc ','regal','cinemark','movie','theater','concert'],label:'entertain'},
+  {words:['cvs','walgreen','rite aid','pharmacy','doctor','medical','dental','vision','clinic','hospital','urgent care','health','prescription'],label:'health'},
+];
+
+function suggestCategory(desc){
+  if(!desc)return null;
+  var d=desc.toLowerCase();
+  var cats=gc();
+  for(var hint of MERCHANT_HINTS){
+    for(var word of hint.words){
+      if(d.includes(word)){
+        // Find a category whose label contains the hint label (case-insensitive)
+        var match=cats.find(c=>c.label.toLowerCase().includes(hint.label)||hint.label.includes(c.label.toLowerCase().replace(/[^a-z]/g,'')));
+        if(match)return match.id;
+        // Fallback: return first non-special category
+        break;
+      }
+    }
+  }
+  // If nothing matched, check if any category label appears in the description
+  for(var c of cats){
+    var words=c.label.toLowerCase().split(/\s+/);
+    for(var w of words){
+      if(w.length>3&&d.includes(w))return c.id;
+    }
+  }
+  return null;
+}
+
+var SAVINGS_TRANSFER_KEYWORDS=['save when you spend','round up','roundup','automatic savings','savings transfer','move money','transfer to savings','transfer from savings','chime transfer','move to spending'];
+
+function isSavingsTransfer(desc){
+  if(!desc)return false;
+  var d=desc.toLowerCase();
+  return SAVINGS_TRANSFER_KEYWORDS.some(k=>d.includes(k));
+}
+
 function firstUncategorized(){
-  return S.txns.find(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit')||null;
+  return S.txns.find(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings')||null;
 }
 
 function banners(){
@@ -350,25 +452,23 @@ function banners(){
   pcsToday().forEach(p=>{
     h+=`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}</div><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button><button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
   });
-  billsToday().forEach(b=>{
-    h+=`<div style="background:var(--bg-warn);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px"><p style="font-size:13px;font-weight:500;color:var(--tx-warn);margin-bottom:2px">${b.name} is due today</p><p style="font-size:12px;color:var(--tx-warn);opacity:.8;margin-bottom:8px">Confirm amount to log payment</p><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="bc-${b.id}" type="number" step="0.01" value="${b.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-cb="${b.id}" style="white-space:nowrap;color:var(--tx-warn);border-color:var(--bd-warn)">Log payment</button><button class="btn" data-db="${b.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
-  });
   // Uncategorized transaction banner
   var unc=firstUncategorized();
   if(unc){
     var cats=gc();
-    var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&t.account==='chime').length;
+    var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings').length;
+    var suggested=unc.suggestedCat||null;
     h+=`<div style="background:var(--bg);border:1px solid var(--bd2);border-radius:12px;padding:14px 16px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div>
-          <p style="font-size:13px;font-weight:500;margin-bottom:2px">Categorize transaction</p>
+          <p style="font-size:13px;font-weight:500;margin-bottom:2px">Categorize transaction${suggested?` <span style="font-size:11px;font-weight:400;color:var(--tx-info)">· suggestion below</span>`:''}</p>
           <p style="font-size:12px;color:var(--tx2)">${unc.desc}</p>
           <p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err);margin-top:2px">${fm(unc.amt)} • ${fd(unc.date)}</p>
         </div>
         ${remaining>1?`<span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${remaining} left</span>`:''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
-        ${cats.map(c=>{var cl=co(c.color);return`<button data-cat-assign="${unc.id}" data-cat-val="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label}</button>`}).join('')}
+        ${cats.map(c=>{var cl=co(c.color);var isSuggested=c.id===suggested;return`<button data-cat-assign="${unc.id}" data-cat-val="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:${isSuggested?'2px solid '+cl.c:'1px solid '+cl.c};background:${isSuggested?cl.c:cl.bg};color:${isSuggested?'var(--bg)':cl.c};font-weight:${isSuggested?'600':'400'}">${isSuggested?'✓ ':''} ${c.label}</button>`}).join('')}
       </div>
       <button data-cat-bill="${unc.id}" class="btn" style="width:100%;font-size:12px;padding:6px;color:var(--tx-warn);border-color:var(--bd-warn)">Mark as bill payment →</button>
       ${S.billAssignTxId===unc.id&&S.bills.length?`<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">Which bill is this?</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>`<button data-bill-assign="${unc.id}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between"><span>${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`).join('')}</div></div>`:''}
@@ -427,28 +527,32 @@ function budgetCard(){
 }
 
 function savingsCard(){
-  if(S.savingsPct===0&&S.savingsTotal===0&&!S.savingsGoal.name)return'';
+  var hasTellerSavings=!!(S.tellerToken&&S.tellerSavingsAccountId);
+  var savBal=hasTellerSavings?S.chimeSavingsBal:S.savingsTotal;
+  var showCard=hasTellerSavings||(S.savingsPct>0||S.savingsTotal>0||S.savingsGoal.name);
+  if(!showCard)return'';
   var goal=S.savingsGoal.amount||0;
-  var pct=goal>0?Math.min(1,S.savingsTotal/goal):0;
+  var pct=goal>0?Math.min(1,savBal/goal):0;
   var lastAmt=S.savingsPct>0&&S.envelopes['__savings']?S.envelopes['__savings']:0;
+  var syncStatus=hasTellerSavings&&S.tellerLastSync?`<p style="font-size:10px;color:var(--tx2);margin-top:4px">Synced ${fd(S.tellerLastSync.split('T')[0])}</p>`:'';
   return`<div style="background:var(--bg);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-  <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx-ok);margin-bottom:12px">Savings goal</p>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <div>
-      <p style="font-size:13px;color:var(--tx2);margin-bottom:2px">${S.savingsGoal.name||'Savings'}</p>
-      <p class="mono" style="font-size:22px;font-weight:500;color:var(--tx-ok)">${fm(S.savingsTotal)}</p>
+      <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx-ok);margin-bottom:4px">Chime Savings${S.savingsGoal.name?' — '+S.savingsGoal.name:''}</p>
+      <p class="mono" style="font-size:22px;font-weight:500;color:var(--tx-ok)">${fm(savBal)}</p>
       ${goal>0?`<p style="font-size:12px;color:var(--tx2);margin-top:2px">of ${fm(goal)} goal</p>`:''}
+      ${syncStatus}
     </div>
     <div style="text-align:right">
       ${lastAmt>0?`<p style="font-size:11px;color:var(--tx2);margin-bottom:4px">Last paycheck</p><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-ok)">+${fm(lastAmt)}</p>`:''}
-      <div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end">
-        <button class="btn" id="savings-deposit-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">+ Add</button>
-        <button class="btn" id="savings-withdraw-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">Withdraw</button>
+      <div style="display:flex;gap:6px;margin-top:${lastAmt>0?'6':'0'}px;justify-content:flex-end">
+        <button class="btn" id="savings-deposit-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">+ Transfer in</button>
+        <button class="btn" id="savings-withdraw-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">Transfer out</button>
       </div>
     </div>
   </div>
-  ${goal>0?`<div style="height:8px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:5px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% of goal • ${fm(Math.max(0,goal-S.savingsTotal))} remaining</p>`:''}
-  ${S.showWithdraw||S.showDeposit?`<div style="margin-top:12px;border-top:1px solid var(--bd-ok);padding-top:12px"><label>${S.showDeposit?'Amount to add':'Withdrawal amount'}</label><div style="display:flex;gap:8px;margin-top:4px"><input class="field mono" id="savings-amt-inp" type="number" step="0.01" min="0.01" placeholder="0.00" style="flex:1"><button class="btn" id="savings-amt-save" style="font-weight:500;color:var(--tx-ok);border-color:var(--bd-ok)">${S.showDeposit?'Add':'Withdraw'}</button><button class="btn" id="savings-amt-cancel">Cancel</button></div></div>`:''}
+  ${goal>0?`<div style="height:8px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:5px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% of goal • ${fm(Math.max(0,goal-savBal))} remaining</p>`:''}
+  ${S.showWithdraw||S.showDeposit?`<div style="margin-top:12px;border-top:1px solid var(--bd-ok);padding-top:12px"><label>${S.showDeposit?'Transfer amount (Chime → Savings)':'Transfer amount (Savings → Chime)'}</label><div style="display:flex;gap:8px;margin-top:4px"><input class="field mono" id="savings-amt-inp" type="number" step="0.01" min="0.01" placeholder="0.00" style="flex:1"><button class="btn" id="savings-amt-save" style="font-weight:500;color:var(--tx-ok);border-color:var(--bd-ok)">${S.showDeposit?'Transfer in':'Transfer out'}</button><button class="btn" id="savings-amt-cancel">Cancel</button></div></div>`:''}
   </div>`;
 }
 
@@ -651,23 +755,20 @@ function loanForm(){
   var f=S.editLoan?S.loans.find(l=>l.id===S.editLoan)||{}:{};
   return`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px"><p style="font-size:14px;font-weight:500;margin-bottom:12px">${S.editLoan?'Edit loan':'New loan'}</p><input class="field" id="lfName" type="text" placeholder="Loan name" value="${f.name||''}" style="margin-bottom:8px">${S.editLoan?`<div style="display:flex;gap:8px;margin-bottom:12px"><div style="flex:1"><label>Original amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" value="${f.orig||''}"></div><div style="flex:1"><label>Current balance</label><input class="field mono" id="lfBal" type="number" step="0.01" min="0" value="${f.bal||''}"></div></div>`:`<div style="margin-bottom:12px"><label>Total loan amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" placeholder="e.g. 15000.00" style="margin-top:4px"></div>`}<div style="display:flex;gap:8px"><button class="btn" id="lfSave" style="flex:1;font-weight:500">Save loan</button><button class="btn" id="lfCancel" style="flex:1">Cancel</button></div></div>`;
 }
-function catMgr(){
-  var cats=gc(),ec=S.editCat?cats.find(c=>c.id===S.editCat):null;
-  return`<div style="border-top:1px solid var(--bd);padding-top:14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><p style="font-size:14px;font-weight:500">Expense categories</p><button class="btn" id="addCatBtn" style="font-size:13px;padding:6px 12px">+ Add</button></div>${S.catForm?`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:10px"><p style="font-size:13px;font-weight:500;margin-bottom:10px">${S.editCat?'Edit category':'New category'}</p><label>Name</label><input class="field" id="catName" type="text" placeholder="e.g. Groceries" value="${ec?ec.label:''}" style="margin-bottom:10px"><label>Color</label><div id="swatches" style="display:flex;gap:8px;margin-bottom:12px">${Object.keys(COLORS).map(k=>swatch(k,k===(ec?ec.color:'warning'))).join('')}</div><input type="hidden" id="catColor" value="${ec?ec.color:'warning'}"><div style="display:flex;gap:8px"><button class="btn" id="catSave" style="flex:1;font-weight:500">Save</button><button class="btn" id="catCancel" style="flex:1">Cancel</button></div></div>`:''  }${!cats.length?'<p style="font-size:13px;color:var(--tx2);margin-bottom:8px">No categories yet.</p>':''}<div style="display:flex;flex-direction:column;gap:6px">${cats.map(c=>{var cl=co(c.color);return`<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px"><span class="tag" style="background:${cl.bg};color:${cl.c}">${c.label}</span><div style="display:flex;gap:6px"><button class="btn" data-ec="${c.id}" style="font-size:12px;padding:4px 10px">Edit</button><button class="btn" data-delc="${c.id}" style="font-size:12px;padding:4px 10px;color:var(--tx-err)">Delete</button></div></div>`}).join('')}</div></div>`;
-}
-
 function historyView(){
-  var cats=gc(),filtered=S.filt==='all'?S.txns:S.txns.filter(t=>t.cat===S.filt);
+  var cats=gc(),filtered=S.filt==='all'?S.txns:S.filt==='__bills'?S.txns.filter(t=>t.isBillPayment):S.filt==='__income'?S.txns.filter(t=>t.txType==='income'):S.txns.filter(t=>t.cat===S.filt);
   return`<div style="padding:16px 16px 0">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h2 style="font-size:18px;font-weight:600">History</h2><button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button></div>
   ${S.txForm?txForm():''}
   <div style="margin-bottom:12px"><label style="margin-bottom:6px">Filter by category</label>
   <div style="display:flex;flex-wrap:wrap;gap:6px">
     <button data-fc="all" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='all'?'var(--bd2)':'var(--bd)'};background:${S.filt==='all'?'var(--bg2)':'var(--bg)'};color:var(--tx2)">All</button>
+    <button data-fc="__bills" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='__bills'?'var(--tx-warn)':'var(--bd)'};background:${S.filt==='__bills'?'var(--bg-warn)':'var(--bg)'};color:${S.filt==='__bills'?'var(--tx-warn)':'var(--tx2)'}">Bills</button>
+    <button data-fc="__income" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='__income'?'var(--tx-ok)':'var(--bd)'};background:${S.filt==='__income'?'var(--bg-ok)':'var(--bg)'};color:${S.filt==='__income'?'var(--tx-ok)':'var(--tx2)'}">Income</button>
     ${cats.map(c=>{var cl=co(c.color),act=S.filt===c.id;return`<button data-fc="${c.id}" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${act?cl.c:'var(--bd)'};background:${act?cl.bg:'var(--bg)'};color:${act?cl.c:'var(--tx2)'}">${c.label}</button>`}).join('')}
   </div></div>
   ${!filtered.length
-    ?`<div style="text-align:center;padding:2rem;color:var(--tx2);font-size:14px;border:1px dashed var(--bd);border-radius:12px">No transactions${S.filt!=='all'?' in this category':' yet'}.</div>`
+    ?`<div style="text-align:center;padding:2rem;color:var(--tx2);font-size:14px;border:1px dashed var(--bd);border-radius:12px">No transactions${S.filt==='__bills'?' marked as bill payments':S.filt==='__income'?' tagged as income':S.filt!=='all'?' in this category':''} yet.</div>`
     :`<div style="display:flex;flex-direction:column;gap:6px">${filtered.map(t=>{
       var isEditing=S.editTx===t.id;
       var isExp=t.amt<0;
@@ -736,7 +837,7 @@ function bind(){
   // Categorize transaction banners
   document.querySelectorAll('[data-cat-assign]').forEach(el=>el.onclick=()=>{
     var txId=el.dataset.catAssign,cat=el.dataset.catVal;
-    S.txns=S.txns.map(t=>t.id===txId?{...t,cat}:t);
+    S.txns=S.txns.map(t=>t.id===txId?{...t,cat,suggestedCat:undefined}:t);
     S.billAssignTxId=null;save();render();
   });
   document.querySelectorAll('[data-cat-bill]').forEach(el=>el.onclick=()=>{
@@ -764,7 +865,7 @@ function bind(){
       var savAmt=Math.round(sts*(S.savingsPct||0)*100)/100;
       newEnv['__savings']=savAmt;
       S.envelopes=newEnv;
-      S.savingsTotal=Math.round((S.savingsTotal+savAmt)*100)/100;
+      if(!S.tellerSavingsAccountId)S.savingsTotal=Math.round((S.savingsTotal+savAmt)*100)/100;
       S.lastPaycheckDate=tod();
     }else{
       S.hsa=Math.round((S.hsa+v)*100)/100;
@@ -775,29 +876,22 @@ function bind(){
   });
   document.querySelectorAll('[data-pc-skip]').forEach(el=>el.onclick=()=>{S.disPcs=S.disPcs.concat([el.dataset.pcSkip]);render()});
 
-  document.querySelectorAll('[data-cb]').forEach(el=>el.onclick=()=>{
-    var bid=el.dataset.cb,b=S.bills.find(x=>x.id===bid);if(!b)return;
-    var i=g('bc-'+bid),v=i?parseFloat(i.value):b.amt;
-    if(isNaN(v)||v<=0)return;
-    S.bal=Math.round((S.bal-v)*100)/100;
-    S.txns=[{id:uid(),desc:b.name+' payment',amt:-v,date:tod(),account:'chime'}].concat(S.txns);
-    S.bills=S.bills.map(x=>x.id===bid?{...x,amt:v,nextDue:adv(x)}:x);
-    save();render();
-  });
-  document.querySelectorAll('[data-db]').forEach(el=>el.onclick=()=>{S.disBills=S.disBills.concat([el.dataset.db]);render()});
-
   var sdb=g('savings-deposit-btn');if(sdb)sdb.onclick=()=>{S.showDeposit=true;S.showWithdraw=false;render()};
   var swb=g('savings-withdraw-btn');if(swb)swb.onclick=()=>{S.showWithdraw=true;S.showDeposit=false;render()};
   var asSave=g('savings-amt-save');if(asSave)asSave.onclick=()=>{
     var v=parseFloat((g('savings-amt-inp')||{}).value);if(isNaN(v)||v<=0)return;
     if(S.showDeposit){
-      S.savingsTotal=Math.round((S.savingsTotal+v)*100)/100;
+      // Transfer from Chime checking to Chime savings
       S.bal=Math.round((S.bal-v)*100)/100;
-      S.txns=[{id:uid(),desc:'Savings deposit',amt:-v,date:tod(),account:'chime',txType:'savings_deposit'}].concat(S.txns);
+      S.chimeSavingsBal=Math.round((S.chimeSavingsBal+v)*100)/100;
+      if(!S.tellerToken)S.savingsTotal=Math.round((S.savingsTotal+v)*100)/100;
+      S.txns=[{id:uid(),desc:'Transfer to savings',amt:-v,date:tod(),account:'chime',txType:'savings_deposit'},{id:uid(),desc:'Transfer from checking',amt:v,date:tod(),account:'chimeSavings',txType:'savings_transfer'}].concat(S.txns);
     }else{
-      S.savingsTotal=Math.max(0,Math.round((S.savingsTotal-v)*100)/100);
-      S.bal=Math.round((S.bal-v)*100)/100;
-      S.txns=[{id:uid(),desc:'Savings withdrawal',amt:-v,date:tod(),account:'chime',txType:'savings_withdrawal'}].concat(S.txns);
+      // Transfer from Chime savings to Chime checking
+      S.chimeSavingsBal=Math.max(0,Math.round((S.chimeSavingsBal-v)*100)/100);
+      S.bal=Math.round((S.bal+v)*100)/100;
+      if(!S.tellerToken)S.savingsTotal=Math.max(0,Math.round((S.savingsTotal-v)*100)/100);
+      S.txns=[{id:uid(),desc:'Transfer from savings',amt:v,date:tod(),account:'chime',txType:'savings_withdrawal'},{id:uid(),desc:'Transfer to checking',amt:-v,date:tod(),account:'chimeSavings',txType:'savings_transfer'}].concat(S.txns);
     }
     S.showWithdraw=false;S.showDeposit=false;save();render();
   };
@@ -897,6 +991,7 @@ function bind(){
     adjAcct(t.account||'chime',-t.amt);
     if(t.txType==='savings_withdrawal'){S.savingsTotal=Math.round((S.savingsTotal+Math.abs(t.amt))*100)/100;}
     if(t.txType==='savings_deposit'){S.savingsTotal=Math.max(0,Math.round((S.savingsTotal-Math.abs(t.amt))*100)/100);}
+    // Note: savings_transfer transactions come in pairs — deleting one doesn't auto-delete the other
     S.txns=S.txns.filter(x=>x.id!==el.dataset.dt);
     save();render();
   });
@@ -922,7 +1017,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
