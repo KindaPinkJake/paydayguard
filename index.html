@@ -41,7 +41,7 @@ nav button.active{color:var(--tx);font-weight:500;border-top-color:var(--tx)}
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import{getAuth,GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import{getFirestore,doc,onSnapshot,setDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{getFirestore,doc,onSnapshot,setDoc,getDoc,deleteDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 const fb=initializeApp({apiKey:"AIzaSyABQvIcpgyTQg4_-rtw_zfxrOSB5ypg0vA",authDomain:"paydayguard.firebaseapp.com",projectId:"paydayguard",storageBucket:"paydayguard.firebasestorage.app",messagingSenderId:"801514317764",appId:"1:801514317764:web:35ee6daae70af0a31fa691"});
 const auth=getAuth(fb),db=getFirestore(fb);
 
@@ -57,7 +57,8 @@ var S={
   view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,
   txForm:false,txType:'expense',txAcct:'chime',
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
-  filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false
+  filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,
+  shareToken:null,showSharePanel:false
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -117,9 +118,23 @@ function save(){
   },800);
 }
 
+async function createShare(){
+  var token=uid()+uid();
+  var data={bal:S.bal,hsa:S.hsa,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsPct:S.savingsPct,savingsGoal:S.savingsGoal,savingsTotal:S.savingsTotal,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,createdAt:Date.now()};
+  await setDoc(doc(db,'shares',token),data);
+  S.shareToken=token;
+  return token;
+}
+async function revokeShare(){
+  if(!S.shareToken)return;
+  await deleteDoc(doc(db,'shares',S.shareToken));
+  S.shareToken=null;
+}
+function shareUrl(){return window.location.origin+window.location.pathname+'?share='+S.shareToken}
+
+
 function upcoming(){
   var pd=getPayday();
-  if(!pd)return[];
   var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');
   return S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd}).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
 }
@@ -134,9 +149,84 @@ function ttag(cat){if(!cat)return'';var c=gcat(cat),cl=co(c.color);return`<span 
 function swatch(k,sel){var cl=co(k);return`<button type="button" data-swatch="${k}" style="width:32px;height:32px;border-radius:50%;background:${cl.bg};border:${sel?'3px solid '+cl.c:'1px solid var(--bd)'};cursor:pointer;flex-shrink:0"></button>`}
 function bcard(title,bid,val){return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:4px">${title}</p><p class="mono" style="font-size:22px;font-weight:500;margin-bottom:8px">${fm(val)}</p><div style="display:flex;gap:6px"><button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button><button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button></div><div id="${bid}-f" style="display:none;margin-top:8px"><input class="field mono" id="${bid}-i" type="number" step="0.01" placeholder="Balance" style="margin-bottom:6px"><button class="btn" id="${bid}-sb" style="width:100%;font-size:12px;padding:6px">Save</button></div></div>`}
 
+function sharedView(d){
+  // Reconstruct state-like object from snapshot for rendering
+  var cats=(d.cats||[{id:'food',label:'Food & Dining',color:'warning',budgetPct:0},{id:'gas',label:'Gas & Transport',color:'info',budgetPct:0},{id:'entertain',label:'Entertainment',color:'success',budgetPct:0},{id:'health',label:'Health & Medical',color:'danger',budgetPct:0},{id:'other',label:'Other',color:'secondary',budgetPct:0}]).map(c=>({budgetPct:0,...c}));
+  var paychecks=d.paychecks||[];
+  // derive payday
+  var chimeChecks=paychecks.filter(p=>p.account==='chime'&&p.nextDate);
+  var pd=chimeChecks.length?chimeChecks.map(p=>p.nextDate).sort()[0]:'';
+  // upcoming bills
+  var bills=d.bills||[];
+  var up=[];
+  if(pd){var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');up=bills.filter(b=>{var dd=new Date(b.nextDue+'T00:00:00');return dd>=now&&dd<=pdd}).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));}
+  var sf=d.bal-up.reduce((s,b)=>s+b.amt,0);
+  var dy=pd?Math.ceil((new Date(pd+'T00:00:00')-new Date().setHours(0,0,0,0))/86400000):null;
+  var lv=pd?(sf<0?'danger':sf<150?'warning':'safe'):'safe';
+  var st=ls(lv);
+  var tot=up.reduce((s,b)=>s+b.amt,0);
+  var loans=d.loans||[];
+  var txns=d.txns||[];
+  var envelopes=d.envelopes||{};
+  var lastPcDate=d.lastPaycheckDate||'';
+  var savingsTotal=d.savingsTotal||0;
+  var savingsGoal=d.savingsGoal||{name:'',amount:0};
+  var savingsPct=d.savingsPct||0;
+
+  function spentSinceSnap(catId){if(!lastPcDate)return 0;return txns.filter(t=>t.cat===catId&&t.date>=lastPcDate&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0)}
+  var totalAlloc=cats.reduce((s,c)=>s+(envelopes[c.id]||0),0);
+  var totalSpent=cats.reduce((s,c)=>s+spentSinceSnap(c.id),0);
+  var spentPct=totalAlloc>0?Math.min(1,totalSpent/totalAlloc):0;
+  var circ=144.51,offset=Math.round(circ*(1-spentPct));
+  var rColor=ringColor(spentPct);
+  var budgetsOn=cats.some(c=>c.budgetPct>0)||savingsPct>0;
+
+  return`<div style="padding:16px 16px 0">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div><p style="font-size:20px;font-weight:600">PaydayGuard</p>
+    <p style="font-size:12px;color:var(--tx-warn);margin-top:2px">👁 Read-only shared view</p></div>
+    ${pd?`<span style="font-size:12px;color:var(--tx2);background:var(--bg);padding:4px 10px;border-radius:8px;border:1px solid var(--bd)">${fd(pd)}</span>`:''}
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:4px">Chime</p><p class="mono" style="font-size:22px;font-weight:500">${fm(d.bal||0)}</p></div>
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:4px">HSA</p><p class="mono" style="font-size:22px;font-weight:500">${fm(d.hsa||0)}</p></div>
+  </div>
+  <div style="border-radius:12px;padding:16px;margin-bottom:10px;border:1px solid ${st.br};background:${st.bg}">
+    <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:${st.c};margin-bottom:4px">Safe to spend</p>
+    <p class="mono" style="font-size:36px;font-weight:600;color:${st.c}">${fm(sf)}</p>
+    <p style="font-size:12px;margin-top:4px;color:${st.c};opacity:.8">${up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'no paycheck set up'}</p>
+  </div>
+  ${up.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Due before payday</p><div style="display:flex;flex-direction:column;gap:6px">${up.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px"><p style="font-size:14px">${b.name}</p><div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err)">${fm(b.amt)}</p><p style="font-size:11px;color:var(--tx2)">${fd(b.nextDue)}</p></div></div>`).join('')}</div></div>`:''}
+  ${budgetsOn?`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:12px">Budget envelopes</p>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+      <svg width="60" height="60" viewBox="0 0 60 60" style="flex-shrink:0"><circle cx="30" cy="30" r="23" fill="none" stroke="var(--bd)" stroke-width="7"/><circle cx="30" cy="30" r="23" fill="none" stroke="${rColor}" stroke-width="7" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" transform="rotate(-90 30 30)"/><text x="30" y="27" text-anchor="middle" font-size="9" fill="var(--tx2)" font-family="system-ui">spent</text><text x="30" y="39" text-anchor="middle" font-size="12" font-weight="500" fill="var(--tx)" font-family="'SF Mono',monospace">${Math.round(spentPct*100)}%</text></svg>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1">
+        <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Spent</p><p class="mono" style="font-size:14px;font-weight:500">${fm(totalSpent)}</p></div>
+        <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Remaining</p><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-ok)">${fm(Math.max(0,totalAlloc-totalSpent))}</p></div>
+        <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Budgeted</p><p class="mono" style="font-size:14px;font-weight:500">${fm(totalAlloc)}</p></div>
+        <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Days left</p><p class="mono" style="font-size:14px;font-weight:500">${dy!==null?dy:'--'}</p></div>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--bd);padding-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+    ${cats.filter(c=>c.budgetPct>0).map(c=>{var alloc=envelopes[c.id]||0,spent=spentSinceSnap(c.id),rem=Math.max(0,alloc-spent),spPct=alloc>0?Math.min(1,spent/alloc):0,dotC=co(c.color).c,amtC=tileAmtColor(rem,alloc),bC=barColor(spent,alloc);return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><div style="width:7px;height:7px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2)">${c.label}</p></div><p class="mono" style="font-size:16px;font-weight:500;color:${amtC}">${fm(rem)}</p><div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-top:6px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(spPct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2);margin-top:3px">left of ${fm(alloc)}</p></div>`}).join('')}
+    </div></div>`:''}
+  ${savingsPct>0||savingsTotal>0?`<div style="background:var(--bg);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx-ok);margin-bottom:12px">Savings goal</p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div><p style="font-size:13px;color:var(--tx2);margin-bottom:2px">${savingsGoal.name||'Savings'}</p><p class="mono" style="font-size:22px;font-weight:500;color:var(--tx-ok)">${fm(savingsTotal)}</p>${savingsGoal.amount>0?`<p style="font-size:12px;color:var(--tx2);margin-top:2px">of ${fm(savingsGoal.amount)} goal</p>`:''}</div>
+    </div>
+    ${savingsGoal.amount>0?`<div style="height:8px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:5px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(Math.min(1,savingsTotal/savingsGoal.amount)*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(Math.min(1,savingsTotal/savingsGoal.amount)*100)}% of goal</p>`:''}
+  </div>`:''}
+  ${loans.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Loans</p><div style="display:flex;flex-direction:column;gap:6px">${loans.map(l=>{var pct=Math.max(0,Math.min(100,Math.round((1-l.bal/l.orig)*100)));return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:12px 14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><p style="font-size:14px;font-weight:500">${l.name}</p><p class="mono" style="font-size:15px;font-weight:500;color:var(--tx-err)">${fm(l.bal)}</p></div><div style="height:6px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:4px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${pct}%"></div></div><p style="font-size:11px;color:var(--tx2)">${pct}% paid off of ${fm(l.orig)}</p></div>`}).join('')}</div></div>`:''}
+  ${txns.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Recent transactions</p><div style="display:flex;flex-direction:column;gap:6px">${txns.slice(0,20).map(t=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="flex:1;min-width:0;margin-right:10px"><p style="font-size:14px;margin-bottom:3px">${t.desc}</p><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${t.cat?ttag(t.cat):''}${acctTag(t.account||'chime')}<span style="font-size:11px;color:var(--tx2)">${fd(t.date)}</span></div></div><p class="mono" style="font-size:15px;font-weight:500;color:${t.amt<0?'var(--tx-err)':'var(--tx-ok)'};flex-shrink:0">${t.amt>=0?'+':''}${fm(t.amt)}</p></div></div>`).join('')}</div></div>`:''}
+  <p style="font-size:12px;color:var(--tx2);text-align:center;padding:16px 0">This is a read-only shared view. Data was shared by the owner and is not live.</p>
+  </div>`;
+}
+
+
 function loginScreen(){
   document.getElementById('nav').style.display='none';
-  return`<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;gap:24px"><div><p style="font-size:32px;margin-bottom:8px">💰</p><p style="font-size:24px;font-weight:600;margin-bottom:8px">PaydayGuard</p><p style="font-size:14px;color:var(--tx2)">Know if you'll make it to payday</p></div><button id="gsign" style="display:flex;align-items:center;gap:12px;padding:12px 24px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);cursor:pointer;font-size:15px;font-weight:500;color:var(--tx)"><svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Sign in with Google</button><p style="font-size:12px;color:var(--tx2);max-width:260px">Your data syncs privately across all your devices.</p></div>`;
 }
 
 function banners(){
@@ -244,8 +334,18 @@ function homeView(){
     <div style="display:flex;align-items:center;gap:8px">
       ${pd?`<span style="font-size:12px;color:var(--tx2);background:var(--bg);padding:4px 10px;border-radius:8px;border:1px solid var(--bd)">${fd(pd)}</span>`:''}
       <button id="soBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:14px;padding:4px 6px" title="Sign out">⎋</button>
+      <button id="shareBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:14px;padding:4px 6px" title="Share">🔗</button>
     </div>
   </div>
+  ${S.showSharePanel?`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <p style="font-size:13px;font-weight:500;margin-bottom:8px">Share read-only view</p>
+    ${S.shareToken
+      ?`<p style="font-size:12px;color:var(--tx2);margin-bottom:8px">Anyone with this link can view your data (read-only). They cannot edit anything.</p>
+        <div style="display:flex;gap:8px;margin-bottom:8px"><input class="field" id="share-url-inp" value="${shareUrl()}" readonly style="font-size:12px;flex:1"><button class="btn" id="share-copy-btn" style="font-size:12px;padding:5px 10px;white-space:nowrap">Copy</button></div>
+        <button class="btn" id="share-revoke-btn" style="width:100%;font-size:13px;color:var(--tx-err);border-color:var(--bd-err)">Revoke access</button>`
+      :`<p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Generate a link to share a read-only snapshot of your data. You can revoke it anytime.</p>
+        <button class="btn" id="share-create-btn" style="width:100%;font-size:13px;font-weight:500">Generate share link</button>`}
+  </div>`:''}
   <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">${bcard('Chime','chime',S.bal)}${bcard('HSA','hsa',S.hsa)}</div>
   ${msg?`<div style="background:${st.bg};border:1px solid ${st.br};border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:${st.c}">${msg}</div>`:''}
   <div style="border-radius:12px;padding:16px;margin-bottom:10px;border:1px solid ${st.br};background:${st.bg}">
@@ -446,8 +546,12 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
+  var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
+  var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
+  var copyBtn=g('share-copy-btn');if(copyBtn)copyBtn.onclick=()=>{var inp=g('share-url-inp');if(inp){navigator.clipboard.writeText(inp.value).then(()=>{copyBtn.textContent='Copied!';setTimeout(()=>{copyBtn.textContent='Copy'},2000)})}};
+  var revokeBtn=g('share-revoke-btn');if(revokeBtn)revokeBtn.onclick=async()=>{if(confirm('Revoke this link? Anyone using it will lose access.')){await revokeShare();render()}};
 
   function ti(eb,fb,ib,val){var e=g(eb),f=g(fb),i=g(ib);if(!e||!f)return;e.onclick=()=>{var sh=f.style.display!=='none';f.style.display=sh?'none':'block';if(!sh&&i){i.value=val;i.focus()}}}
   ti('chime-eb','chime-f','chime-i',S.bal);ti('hsa-eb','hsa-f','hsa-i',S.hsa);
@@ -583,10 +687,27 @@ function bind(){
   });
 }
 
+// Check for shared view
+var shareParam=new URLSearchParams(window.location.search).get('share');
+if(shareParam){
+  document.getElementById('nav').style.display='none';
+  document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading shared view...</p>';
+  getDoc(doc(db,'shares',shareParam)).then(snap=>{
+    if(snap.exists()){
+      document.getElementById('content').innerHTML=sharedView(snap.data());
+    }else{
+      document.getElementById('content').innerHTML='<div style="padding:2rem;text-align:center"><p style="font-size:32px;margin-bottom:12px">🔗</p><p style="font-size:18px;font-weight:600;margin-bottom:8px">Link expired or revoked</p><p style="font-size:14px;color:var(--tx2)">This share link is no longer valid.</p></div>';
+    }
+  }).catch(e=>{
+    document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Error loading shared view.</p>';
+    console.error(e);
+  });
+}else{
+
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false});
+    Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,shareToken:null,showSharePanel:false});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
@@ -595,6 +716,7 @@ onAuthStateChanged(auth,async user=>{
   }
 });
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');
+}
 </script>
 </body>
 </html>
