@@ -58,7 +58,9 @@ var S={
   txForm:false,txType:'expense',txAcct:'chime',
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
   filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,
-  shareToken:null,showSharePanel:false
+  shareToken:null,showSharePanel:false,
+  tellerToken:null,tellerAccountId:null,tellerSyncing:false,tellerLastSync:null,
+  billAssignTxId:null
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -105,6 +107,9 @@ function startListener(){
       S.savingsTotal=d.savingsTotal||0;
       S.envelopes=d.envelopes||{};
       S.lastPaycheckDate=d.lastPaycheckDate||'';
+      S.tellerToken=d.tellerToken||null;
+      S.tellerAccountId=d.tellerAccountId||null;
+      S.tellerLastSync=d.tellerLastSync||null;
     }
     render();
   },e=>console.error(e));
@@ -113,7 +118,7 @@ function save(){
   if(!U)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsPct:S.savingsPct,savingsGoal:S.savingsGoal,savingsTotal:S.savingsTotal,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsPct:S.savingsPct,savingsGoal:S.savingsGoal,savingsTotal:S.savingsTotal,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerLastSync:S.tellerLastSync})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -133,9 +138,71 @@ async function revokeShare(){
 function shareUrl(){return window.location.origin+window.location.pathname+'?share='+S.shareToken}
 
 
+const FUNCTIONS_BASE='https://us-central1-paydayguard.cloudfunctions.net';
+
+async function tellerSync(){
+  if(!S.tellerToken||!S.tellerAccountId)return;
+  S.tellerSyncing=true;render();
+  try{
+    // Fetch balance
+    var balRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId})});
+    var balData=await balRes.json();
+    if(balData.balance){
+      var newBal=parseFloat(balData.balance.available||balData.balance.ledger||0);
+      S.bal=Math.round(newBal*100)/100;
+    }
+    // Fetch transactions
+    var txRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId})});
+    var txData=await txRes.json();
+    if(txData.transactions&&txData.transactions.length){
+      var existing=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
+      var newTxns=txData.transactions
+        .filter(t=>!existing.has(t.id))
+        .map(t=>({
+          id:uid(),
+          tellerId:t.id,
+          desc:t.description||t.details?.counterparty?.name||'Chime transaction',
+          amt:t.type==='credit'?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount)),
+          date:t.date,
+          account:'chime'
+        }));
+      if(newTxns.length)S.txns=newTxns.concat(S.txns);
+    }
+    S.tellerLastSync=new Date().toISOString();
+    save();
+  }catch(e){console.error('Teller sync error',e)}
+  S.tellerSyncing=false;render();
+}
+
+function openTellerConnect(){
+  var script=document.createElement('script');
+  script.src='https://cdn.teller.io/connect/connect.js';
+  script.onload=function(){
+    var tc=window.TellerConnect.setup({
+      applicationId:'app_prp572s7pk1512s5r6000',
+      onSuccess:async function(enrollment){
+        S.tellerToken=enrollment.accessToken;
+        // Get accounts to find Chime checking
+        var res=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:enrollment.accessToken})});
+        var data=await res.json();
+        if(data.accounts&&data.accounts.length){
+          // Prefer checking account
+          var checking=data.accounts.find(a=>a.subtype==='checking')||data.accounts[0];
+          S.tellerAccountId=checking.id;
+        }
+        save();
+        await tellerSync();
+      },
+      onExit:function(){render()}
+    });
+    tc.open();
+  };
+  document.head.appendChild(script);
+}
+
+
 function upcoming(){
   var pd=getPayday();
-  var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');
   return S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd}).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
 }
 function safe(){return S.bal-upcoming().reduce((s,b)=>s+b.amt,0)}
@@ -147,7 +214,28 @@ function pcsToday(){var t=tod();return S.paychecks.filter(p=>p.nextDate===t&&!S.
 
 function ttag(cat){if(!cat)return'';var c=gcat(cat),cl=co(c.color);return`<span class="tag" style="background:${cl.bg};color:${cl.c}">${c.label}</span>`}
 function swatch(k,sel){var cl=co(k);return`<button type="button" data-swatch="${k}" style="width:32px;height:32px;border-radius:50%;background:${cl.bg};border:${sel?'3px solid '+cl.c:'1px solid var(--bd)'};cursor:pointer;flex-shrink:0"></button>`}
-function bcard(title,bid,val){return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:4px">${title}</p><p class="mono" style="font-size:22px;font-weight:500;margin-bottom:8px">${fm(val)}</p><div style="display:flex;gap:6px"><button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button><button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button></div><div id="${bid}-f" style="display:none;margin-top:8px"><input class="field mono" id="${bid}-i" type="number" step="0.01" placeholder="Balance" style="margin-bottom:6px"><button class="btn" id="${bid}-sb" style="width:100%;font-size:12px;padding:6px">Save</button></div></div>`}
+function bcard(title,bid,val){
+  var isChime=bid==='chime';
+  var tellerConnected=isChime&&S.tellerToken&&S.tellerAccountId;
+  var syncBtn=tellerConnected
+    ?`<button class="btn" id="chime-sync" style="font-size:12px;padding:5px 10px;flex:1;${S.tellerSyncing?'opacity:.5':''}">${S.tellerSyncing?'Syncing...':'↻ Sync'}</button>`
+    :(isChime?`<button class="btn" id="chime-connect" style="font-size:12px;padding:5px 10px;flex:1;color:var(--tx-info);border-color:var(--bd)">Link Chime</button>`:'');
+  var lastSync=tellerConnected&&S.tellerLastSync?`<p style="font-size:10px;color:var(--tx2);margin-top:4px">Synced ${fd(S.tellerLastSync.split('T')[0])}</p>`:'';
+  return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px">
+    <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:4px">${title}</p>
+    <p class="mono" style="font-size:22px;font-weight:500;margin-bottom:8px">${fm(val)}</p>
+    <div style="display:flex;gap:6px">
+      <button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
+      <button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
+      ${syncBtn}
+    </div>
+    ${lastSync}
+    <div id="${bid}-f" style="display:none;margin-top:8px">
+      <input class="field mono" id="${bid}-i" type="number" step="0.01" placeholder="Balance" style="margin-bottom:6px">
+      <button class="btn" id="${bid}-sb" style="width:100%;font-size:12px;padding:6px">Save</button>
+    </div>
+  </div>`;
+}
 
 function sharedView(d){
   // Reconstruct state-like object from snapshot for rendering
@@ -227,6 +315,11 @@ function sharedView(d){
 
 function loginScreen(){
   document.getElementById('nav').style.display='none';
+  return`<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;gap:24px"><div><p style="font-size:32px;margin-bottom:8px">💰</p><p style="font-size:24px;font-weight:600;margin-bottom:8px">PaydayGuard</p><p style="font-size:14px;color:var(--tx2)">Know if you'll make it to payday</p></div><button id="gsign" style="display:flex;align-items:center;gap:12px;padding:12px 24px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);cursor:pointer;font-size:15px;font-weight:500;color:var(--tx)"><svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Sign in with Google</button><p style="font-size:12px;color:var(--tx2);max-width:260px">Your data syncs privately across all your devices.</p></div>`;
+}
+
+function firstUncategorized(){
+  return S.txns.find(t=>t.amt<0&&!t.cat&&t.account==='chime')||null;
 }
 
 function banners(){
@@ -237,6 +330,27 @@ function banners(){
   billsToday().forEach(b=>{
     h+=`<div style="background:var(--bg-warn);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px"><p style="font-size:13px;font-weight:500;color:var(--tx-warn);margin-bottom:2px">${b.name} is due today</p><p style="font-size:12px;color:var(--tx-warn);opacity:.8;margin-bottom:8px">Confirm amount to log payment</p><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="bc-${b.id}" type="number" step="0.01" value="${b.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-cb="${b.id}" style="white-space:nowrap;color:var(--tx-warn);border-color:var(--bd-warn)">Log payment</button><button class="btn" data-db="${b.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
   });
+  // Uncategorized transaction banner
+  var unc=firstUncategorized();
+  if(unc){
+    var cats=gc();
+    var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&t.account==='chime').length;
+    h+=`<div style="background:var(--bg);border:1px solid var(--bd2);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <p style="font-size:13px;font-weight:500;margin-bottom:2px">Categorize transaction</p>
+          <p style="font-size:12px;color:var(--tx2)">${unc.desc}</p>
+          <p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err);margin-top:2px">${fm(unc.amt)} • ${fd(unc.date)}</p>
+        </div>
+        ${remaining>1?`<span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${remaining} left</span>`:''}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        ${cats.map(c=>{var cl=co(c.color);return`<button data-cat-assign="${unc.id}" data-cat-val="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label}</button>`}).join('')}
+      </div>
+      <button data-cat-bill="${unc.id}" class="btn" style="width:100%;font-size:12px;padding:6px;color:var(--tx-warn);border-color:var(--bd-warn)">Mark as bill payment →</button>
+      ${S.billAssignTxId===unc.id&&S.bills.length?`<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">Which bill is this?</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>`<button data-bill-assign="${unc.id}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between"><span>${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`).join('')}</div></div>`:''}
+    </div>`;
+  }
   return h;
 }
 
@@ -559,6 +673,27 @@ function bind(){
   var hsb=g('hsa-sb');if(hsb)hsb.onclick=()=>{var v=parseFloat(g('hsa-i').value);if(!isNaN(v)){S.hsa=Math.round(v*100)/100;save();render()}};
   var clb=g('chime-log');if(clb)clb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='chime';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
   var hlb=g('hsa-log');if(hlb)hlb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='hsa';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
+  var connectBtn=g('chime-connect');if(connectBtn)connectBtn.onclick=()=>openTellerConnect();
+  var syncBtn=g('chime-sync');if(syncBtn)syncBtn.onclick=()=>{if(!S.tellerSyncing)tellerSync()};
+
+  // Categorize transaction banners
+  document.querySelectorAll('[data-cat-assign]').forEach(el=>el.onclick=()=>{
+    var txId=el.dataset.catAssign,cat=el.dataset.catVal;
+    S.txns=S.txns.map(t=>t.id===txId?{...t,cat}:t);
+    S.billAssignTxId=null;save();render();
+  });
+  document.querySelectorAll('[data-cat-bill]').forEach(el=>el.onclick=()=>{
+    S.billAssignTxId=S.billAssignTxId===el.dataset.catBill?null:el.dataset.catBill;render();
+  });
+  document.querySelectorAll('[data-bill-assign]').forEach(el=>el.onclick=()=>{
+    var txId=el.dataset.billAssign,billId=el.dataset.billId;
+    var bill=S.bills.find(b=>b.id===billId);
+    if(!bill)return;
+    // Mark transaction as bill payment and advance bill due date
+    S.txns=S.txns.map(t=>t.id===txId?{...t,desc:bill.name+' payment',isBillPayment:true,billId}:t);
+    S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+    S.billAssignTxId=null;save();render();
+  });
 
   document.querySelectorAll('[data-pc-apply]').forEach(el=>el.onclick=()=>{
     var pid=el.dataset.pcApply,p=S.paychecks.find(x=>x.id===pid);if(!p)return;
@@ -707,7 +842,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,shareToken:null,showSharePanel:false});
+    Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
