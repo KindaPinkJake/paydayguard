@@ -583,14 +583,8 @@ function bind(){
   });
 }
 
-const OWNER_UID='4aM94bSgSKc1yCvi4LaNOO4LnOH3';
 onAuthStateChanged(auth,async user=>{
-  if(user&&user.uid!==OWNER_UID){
-    await signOut(auth);
-    document.getElementById('nav').style.display='none';
-    document.getElementById('content').innerHTML='<div style="padding:2rem;text-align:center"><p style="font-size:32px;margin-bottom:12px">🔒</p><p style="font-size:18px;font-weight:600;margin-bottom:8px">Private app</p><p style="font-size:14px;color:var(--tx2)">This app is private.</p></div>';
-    return;
-  }
+  if(false){
   U=user;
   if(user){
     Object.assign(S,{bal:0,hsa:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsPct:0,savingsGoal:{name:'',amount:0},savingsTotal:0,envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disBills:[],disPcs:[],showWithdraw:false,showDeposit:false});
