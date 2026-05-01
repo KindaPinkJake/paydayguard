@@ -61,7 +61,8 @@ var S={
   shareToken:null,showSharePanel:false,
   tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,
   billAssignTxId:null,editTx:null,
-  goalForm:false,editGoal:null
+  goalForm:false,editGoal:null,
+  merchantMemory:{}
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -112,8 +113,15 @@ function startListener(){
       S.tellerSavingsAccountId=d.tellerSavingsAccountId||null;
       S.tellerLastSync=d.tellerLastSync||null;
       S.shareToken=d.shareToken||null;
+      S.merchantMemory=d.merchantMemory||{};
     }
     render();
+    // One-time migration: fix any income transactions that were imported as negative
+    var hadBadIncome=S.txns.some(t=>t.txType==='income'&&t.amt<0);
+    if(hadBadIncome){
+      S.txns=S.txns.map(t=>t.txType==='income'&&t.amt<0?{...t,amt:Math.abs(t.amt)}:t);
+      save();
+    }
     // Auto-sync with Teller on first load if connected
     if(firstLoad&&S.tellerToken&&S.tellerAccountId){
       firstLoad=false;
@@ -127,7 +135,7 @@ function save(){
   if(!U)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerSavingsAccountId:S.tellerSavingsAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerSavingsAccountId:S.tellerSavingsAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken,merchantMemory:S.merchantMemory})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -193,8 +201,24 @@ async function tellerSync(){
         if(isCredit){tx.txType='income';}
         else if(isSavingsTransfer(desc)){tx.txType='savings_transfer';}
         else{
-          var suggested=suggestCategory(desc);
-          if(suggested)tx.suggestedCat=suggested;
+          // Check merchant memory first, then keyword hints
+          var key=merchantKey(desc);
+          var remembered=key?S.merchantMemory[key]:null;
+          if(remembered&&remembered.startsWith('__bill:')){
+            var billId=remembered.replace('__bill:','');
+            var bill=S.bills.find(b=>b.id===billId);
+            if(bill){
+              tx.suggestedBillId=billId;
+            }else{
+              var suggested=suggestCategory(desc);
+              if(suggested)tx.suggestedCat=suggested;
+            }
+          }else if(remembered&&gc().find(c=>c.id===remembered)){
+            tx.suggestedCat=remembered;
+          }else{
+            var suggested=suggestCategory(desc);
+            if(suggested)tx.suggestedCat=suggested;
+          }
         }
         return tx;
       });
@@ -311,7 +335,10 @@ function bcard(title,bid,val){
   var isChime=bid==='chime';
   var tellerConnected=isChime&&S.tellerToken&&S.tellerAccountId;
   var syncBtn=tellerConnected
-    ?`<button class="btn" id="chime-sync" style="font-size:12px;padding:5px 10px;flex:1;${S.tellerSyncing?'opacity:.5':''}">${S.tellerSyncing?'Syncing...':'↻ Sync'}</button>`
+    ?`<div style="display:flex;gap:6px;flex:1">
+        <button class="btn" id="chime-sync" style="font-size:12px;padding:5px 10px;flex:1;${S.tellerSyncing?'opacity:.5':''}">${S.tellerSyncing?'Syncing...':'↻ Sync'}</button>
+        ${!S.tellerSavingsAccountId?`<button class="btn" id="chime-relink" style="font-size:11px;padding:5px 8px;color:var(--tx-info);border-color:var(--bd)">Link Savings</button>`:''}
+      </div>`
     :(isChime?`<button class="btn" id="chime-connect" style="font-size:12px;padding:5px 10px;flex:1;color:var(--tx-info);border-color:var(--bd)">Link Chime</button>`:'');
   var lastSync=tellerConnected&&S.tellerLastSync?`<p style="font-size:10px;color:var(--tx2);margin-top:4px">Synced ${fd(S.tellerLastSync.split('T')[0])}</p>`:'';
   return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px">
@@ -418,8 +445,20 @@ var MERCHANT_HINTS=[
   {words:['cvs','walgreen','rite aid','pharmacy','doctor','medical','dental','vision','clinic','hospital','urgent care','health','prescription'],label:'health'},
 ];
 
+function merchantKey(desc){
+  if(!desc)return'';
+  // Normalize: lowercase, strip punctuation, take first 4 words
+  return desc.toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,4).join(' ');
+}
+
 function suggestCategory(desc){
   if(!desc)return null;
+  // Check merchant memory first — user's past choices take priority
+  var key=merchantKey(desc);
+  if(key&&S.merchantMemory[key]){
+    var remembered=S.merchantMemory[key];
+    if(gc().find(c=>c.id===remembered))return remembered;
+  }
   var d=desc.toLowerCase();
   var cats=gc();
   for(var hint of MERCHANT_HINTS){
@@ -454,7 +493,6 @@ function isSavingsTransfer(desc){
 function firstUncategorized(){
   return S.txns.find(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings')||null;
 }
-
 function banners(){
   var h='';
   pcsToday().forEach(p=>{
@@ -479,7 +517,7 @@ function banners(){
         ${cats.map(c=>{var cl=co(c.color);var isSuggested=c.id===suggested;return`<button data-cat-assign="${unc.id}" data-cat-val="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:${isSuggested?'2px solid '+cl.c:'1px solid '+cl.c};background:${isSuggested?cl.c:cl.bg};color:${isSuggested?'var(--bg)':cl.c};font-weight:${isSuggested?'600':'400'}">${isSuggested?'✓ ':''} ${c.label}</button>`}).join('')}
       </div>
       <button data-cat-bill="${unc.id}" class="btn" style="width:100%;font-size:12px;padding:6px;color:var(--tx-warn);border-color:var(--bd-warn)">Mark as bill payment →</button>
-      ${S.billAssignTxId===unc.id&&S.bills.length?`<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">Which bill is this?</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>`<button data-bill-assign="${unc.id}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between"><span>${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`).join('')}</div></div>`:''}
+      ${(S.billAssignTxId===unc.id||unc.suggestedBillId)&&S.bills.length?`<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedBillId?'Looks like this bill:':'Which bill is this?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>{var isSug=b.id===unc.suggestedBillId;return`<button data-bill-assign="${unc.id}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-ok);background:var(--bg-ok);':''}"><span>${isSug?'✓ ':''} ${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`;}).join('')}</div></div>`:''}
     </div>`;
   }
   return h;
@@ -917,11 +955,17 @@ function bind(){
   var clb=g('chime-log');if(clb)clb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='chime';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
   var hlb=g('hsa-log');if(hlb)hlb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='hsa';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
   var connectBtn=g('chime-connect');if(connectBtn)connectBtn.onclick=()=>openTellerConnect();
+  var relinkBtn=g('chime-relink');if(relinkBtn)relinkBtn.onclick=()=>openTellerConnect();
   var syncBtn=g('chime-sync');if(syncBtn)syncBtn.onclick=()=>{if(!S.tellerSyncing)tellerSync()};
 
   // Categorize transaction banners
   document.querySelectorAll('[data-cat-assign]').forEach(el=>el.onclick=()=>{
     var txId=el.dataset.catAssign,cat=el.dataset.catVal;
+    var tx=S.txns.find(t=>t.id===txId);
+    if(tx&&tx.desc){
+      var key=merchantKey(tx.desc);
+      if(key)S.merchantMemory={...S.merchantMemory,[key]:cat};
+    }
     S.txns=S.txns.map(t=>t.id===txId?{...t,cat,suggestedCat:undefined}:t);
     S.billAssignTxId=null;save();render();
   });
@@ -932,8 +976,9 @@ function bind(){
     var txId=el.dataset.billAssign,billId=el.dataset.billId;
     var bill=S.bills.find(b=>b.id===billId);
     if(!bill)return;
-    // Mark transaction as bill payment and advance bill due date
-    S.txns=S.txns.map(t=>t.id===txId?{...t,desc:bill.name+' payment',isBillPayment:true,billId}:t);
+    var tx=S.txns.find(t=>t.id===txId);
+    if(tx&&tx.desc){var key=merchantKey(tx.desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__bill:'+billId};}
+    S.txns=S.txns.map(t=>t.id===txId?{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined}:t);
     S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
     S.billAssignTxId=null;save();render();
   });
@@ -1127,7 +1172,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{}});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
