@@ -57,7 +57,7 @@ var S={
   view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,
   txForm:false,txType:'expense',txAcct:'chime',
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
-  filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
+  filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
   shareToken:null,showSharePanel:false,
   tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,
   billAssignTxId:null,editTx:null,
@@ -105,7 +105,7 @@ function startListener(){
       S.bal=d.bal||0;S.hsa=d.hsa||0;S.chimeSavingsBal=d.chimeSavingsBal||0;
       S.paychecks=d.paychecks||[];S.bills=d.bills||[];S.txns=d.txns||[];
       S.cats=d.cats||null;S.loans=d.loans||[];
-      S.savingsGoals=d.savingsGoals||(d.savingsGoal&&d.savingsGoal.name?[{id:uid(),name:d.savingsGoal.name,target:d.savingsGoal.amount||0,saved:d.savingsTotal||0,budgetPct:d.savingsPct||0}]:[]);
+      S.savingsGoals=d.savingsGoals||(d.savingsGoal&&d.savingsGoal.name?[{id:uid(),name:d.savingsGoal.name,target:d.savingsGoal.amount||0,allocated:d.savingsTotal||d.allocated||0,budgetPct:d.savingsPct||0}]:[]);
       S.envelopes=d.envelopes||{};
       S.lastPaycheckDate=d.lastPaycheckDate||'';
       S.tellerToken=d.tellerToken||null;
@@ -248,7 +248,7 @@ async function tellerSync(){
           S.savingsGoals=S.savingsGoals.map(g=>{
             var contrib=Math.round(sts*(g.budgetPct||0)*100)/100;
             newEnv['__sg_'+g.id]=contrib;
-            return{...g,saved:Math.round((g.saved+contrib)*100)/100};
+            return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
           });
           S.envelopes=newEnv;
           S.lastPaycheckDate=t.date;
@@ -379,8 +379,8 @@ function sharedView(d){
   var txns=d.txns||[];
   var envelopes=d.envelopes||{};
   var lastPcDate=d.lastPaycheckDate||'';
-  var savingsGoals=(d.savingsGoals||(d.savingsGoal&&d.savingsGoal.name?[{id:'legacy',name:d.savingsGoal.name,target:d.savingsGoal.amount||0,saved:d.savingsTotal||0}]:[]));
-  var chimeSavingsBal=d.chimeSavingsBal||savingsGoals.reduce((s,g)=>s+g.saved,0);
+  var savingsGoals=(d.savingsGoals||(d.savingsGoal&&d.savingsGoal.name?[{id:'legacy',name:d.savingsGoal.name,target:d.savingsGoal.amount||0,allocated:d.savingsTotal||d.allocated||0}]:[]));
+  var chimeSavingsBal=d.chimeSavingsBal||savingsGoals.reduce((s,g)=>s+g.allocated,0);
 
   function spentSinceSnap(catId){if(!lastPcDate)return 0;return txns.filter(t=>t.cat===catId&&t.date>=lastPcDate&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0)}
   var totalAlloc=cats.reduce((s,c)=>s+(envelopes[c.id]||0),0);
@@ -423,7 +423,7 @@ function sharedView(d){
   ${savingsGoals.length>0||chimeSavingsBal>0?`<div style="background:var(--bg);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px">
     <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx-ok);margin-bottom:12px">Chime Savings</p>
     <p class="mono" style="font-size:22px;font-weight:500;color:var(--tx-ok);margin-bottom:10px">${fm(chimeSavingsBal)}</p>
-    ${savingsGoals.map(g=>{var pct=g.target>0?Math.min(1,g.saved/g.target):0;return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:6px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px"><p style="font-size:13px;font-weight:500">${g.name}</p><p class="mono" style="font-size:13px;color:var(--tx-ok)">${fm(g.saved)}${g.target?` / ${fm(g.target)}`:''}</p></div>${g.target>0?`<div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-bottom:3px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% of goal</p>`:''}</div>`;}).join('')}
+    ${savingsGoals.map(g=>{var pct=g.target>0?Math.min(1,g.allocated/g.target):0;return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:6px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px"><p style="font-size:13px;font-weight:500">${g.name}</p><p class="mono" style="font-size:13px;color:var(--tx-ok)">${fm(g.allocated)}${g.target?` / ${fm(g.target)}`:''}</p></div>${g.target>0?`<div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-bottom:3px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% of goal</p>`:''}</div>`;}).join('')}
   </div>`:''}
   ${loans.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Loans</p><div style="display:flex;flex-direction:column;gap:6px">${loans.map(l=>{var pct=Math.max(0,Math.min(100,Math.round((1-l.bal/l.orig)*100)));return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:12px 14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><p style="font-size:14px;font-weight:500">${l.name}</p><p class="mono" style="font-size:15px;font-weight:500;color:var(--tx-err)">${fm(l.bal)}</p></div><div style="height:6px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:4px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${pct}%"></div></div><p style="font-size:11px;color:var(--tx2)">${pct}% paid off of ${fm(l.orig)}</p></div>`}).join('')}</div></div>`:''}
   ${txns.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Recent transactions</p><div style="display:flex;flex-direction:column;gap:6px">${txns.slice(0,20).map(t=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="flex:1;min-width:0;margin-right:10px"><p style="font-size:14px;margin-bottom:3px">${t.desc}</p><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${t.cat?ttag(t.cat):''}${acctTag(t.account||'chime')}<span style="font-size:11px;color:var(--tx2)">${fd(t.date)}</span></div></div><p class="mono" style="font-size:15px;font-weight:500;color:${t.amt<0?'var(--tx-err)':'var(--tx-ok)'};flex-shrink:0">${t.amt>=0?'+':''}${fm(t.amt)}</p></div></div>`).join('')}</div></div>`:''}
@@ -576,10 +576,10 @@ function budgetCard(){
 
 function savingsCard(){
   var hasTellerSavings=!!(S.tellerToken&&S.tellerSavingsAccountId);
-  var savBal=hasTellerSavings?S.chimeSavingsBal:S.savingsGoals.reduce((s,g)=>s+g.saved,0);
+  var savBal=hasTellerSavings?S.chimeSavingsBal:S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
   var showCard=hasTellerSavings||S.savingsGoals.length>0;
   if(!showCard)return'';
-  var totalAllocated=S.savingsGoals.reduce((s,g)=>s+g.saved,0);
+  var totalAllocated=S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
   var unallocated=Math.max(0,Math.round((savBal-totalAllocated)*100)/100);
   var lastAmt=S.savingsGoals.reduce((s,g)=>{var contrib=S.envelopes['__sg_'+g.id]||0;return s+contrib},0);
   var syncStatus=hasTellerSavings&&S.tellerLastSync?`<p style="font-size:10px;color:var(--tx2);margin-top:2px">Synced ${fd(S.tellerLastSync.split('T')[0])}</p>`:'';
@@ -591,7 +591,7 @@ function savingsCard(){
     </div>
     ${S.savingsGoals.length?`<label style="margin-bottom:6px">Allocate to goal</label>
     <div style="display:flex;flex-direction:column;gap:6px">
-      ${S.savingsGoals.map(g=>`<button data-deposit-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.savingsDepositGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.saved)}${g.target?` / ${fm(g.target)}`:''}</span></button>`).join('')}
+      ${S.savingsGoals.map(g=>`<button data-deposit-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.savingsDepositGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.allocated)}${g.target?` / ${fm(g.target)}`:''}</span></button>`).join('')}
       <button data-deposit-goal="__unallocated" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;${S.savingsDepositGoalId==='__unallocated'?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}">Unallocated</button>
     </div>`:''}
     <div style="display:flex;gap:8px;margin-top:10px">
@@ -607,7 +607,7 @@ function savingsCard(){
     </div>
     ${S.savingsGoals.length?`<label style="margin-bottom:6px">From which goal?</label>
     <div style="display:flex;flex-direction:column;gap:6px">
-      ${S.savingsGoals.map(g=>`<button data-withdraw-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.savingsWithdrawGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.saved)}</span></button>`).join('')}
+      ${S.savingsGoals.map(g=>`<button data-withdraw-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.savingsWithdrawGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.allocated)}</span></button>`).join('')}
       <button data-withdraw-goal="__unallocated" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;${S.savingsWithdrawGoalId==='__unallocated'?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}">Unallocated (${fm(unallocated)})</button>
     </div>`:''}
     <div style="display:flex;gap:8px;margin-top:10px">
@@ -633,17 +633,17 @@ function savingsCard(){
   </div>
   ${S.savingsGoals.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${unallocated>0?'8':'0'}px">
     ${S.savingsGoals.map(g=>{
-      var pct=g.target>0?Math.min(1,g.saved/g.target):0;
+      var pct=g.target>0?Math.min(1,g.allocated/g.target):0;
       var contrib=S.envelopes['__sg_'+g.id]||0;
       return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
           <p style="font-size:13px;font-weight:500">${g.name}</p>
           <div style="text-align:right">
-            <p class="mono" style="font-size:13px;color:var(--tx-ok)">${fm(g.saved)}${g.target?` / ${fm(g.target)}`:''}</p>
+            <p class="mono" style="font-size:13px;color:var(--tx-ok)">${fm(g.allocated)}${g.target?` / ${fm(g.target)}`:''}</p>
             ${contrib>0?`<p style="font-size:10px;color:var(--tx2)">+${fm(contrib)} last paycheck</p>`:''}
           </div>
         </div>
-        ${g.target>0?`<div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-bottom:3px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% • ${fm(Math.max(0,g.target-g.saved))} to go</p>`:''}
+        ${g.target>0?`<div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-bottom:3px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% • ${fm(Math.max(0,g.target-g.allocated))} to go</p>`:''}
       </div>`;
     }).join('')}
   </div>`:''}
@@ -656,7 +656,7 @@ function savingsCard(){
     <input class="field mono" id="allocate-amt-inp" type="number" step="0.01" min="0.01" max="${unallocated}" placeholder="0.00" style="margin-bottom:8px">
     <label style="margin-bottom:6px">Move to which goal?</label>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-      ${S.savingsGoals.map(g=>`<button data-allocate-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.allocateGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.saved)}</span></button>`).join('')}
+      ${S.savingsGoals.map(g=>`<button data-allocate-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.allocateGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.allocated)}</span></button>`).join('')}
     </div>
     <div style="display:flex;gap:8px">
       <button class="btn" id="allocate-save" style="flex:1;font-weight:500;color:var(--tx-ok);border-color:var(--bd-ok)">Move</button>
@@ -830,12 +830,12 @@ function billsView(){
     ${!S.savingsGoals.length&&!S.goalForm?'<p style="font-size:13px;color:var(--tx2);margin-bottom:4px">No savings goals yet.</p>':''}
     <div style="display:flex;flex-direction:column;gap:6px">
     ${S.savingsGoals.map(g=>{
-      var pct=g.target>0?Math.min(1,g.saved/g.target):0;
+      var pct=g.target>0?Math.min(1,g.allocated/g.target):0;
       return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${g.target>0?'6':'0'}px">
           <p style="font-size:14px;font-weight:500">${g.name}</p>
           <div style="display:flex;align-items:center;gap:8px">
-            <p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-ok)">${fm(g.saved)}${g.target?` / ${fm(g.target)}`:''}</p>
+            <p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-ok)">${fm(g.allocated)}${g.target?` / ${fm(g.target)}`:''}</p>
             <button class="btn" data-eg="${g.id}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx2)">Edit</button>
             <button class="btn" data-delg="${g.id}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err)">✕</button>
           </div>
@@ -896,17 +896,39 @@ function loanForm(){
   return`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px"><p style="font-size:14px;font-weight:500;margin-bottom:12px">${S.editLoan?'Edit loan':'New loan'}</p><input class="field" id="lfName" type="text" placeholder="Loan name" value="${f.name||''}" style="margin-bottom:8px">${S.editLoan?`<div style="display:flex;gap:8px;margin-bottom:12px"><div style="flex:1"><label>Original amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" value="${f.orig||''}"></div><div style="flex:1"><label>Current balance</label><input class="field mono" id="lfBal" type="number" step="0.01" min="0" value="${f.bal||''}"></div></div>`:`<div style="margin-bottom:12px"><label>Total loan amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" placeholder="e.g. 15000.00" style="margin-top:4px"></div>`}<div style="display:flex;gap:8px"><button class="btn" id="lfSave" style="flex:1;font-weight:500">Save loan</button><button class="btn" id="lfCancel" style="flex:1">Cancel</button></div></div>`;
 }
 function historyView(){
-  var cats=gc(),filtered=S.filt==='all'?S.txns:S.filt==='__bills'?S.txns.filter(t=>t.isBillPayment):S.filt==='__income'?S.txns.filter(t=>t.txType==='income'):S.txns.filter(t=>t.cat===S.filt);
+  var cats=gc();
+  var txns=S.txns;
+  // Account filter
+  if(S.filtAcct&&S.filtAcct!=='all') txns=txns.filter(t=>(t.account||'chime')===S.filtAcct);
+  // Date filter
+  if(S.filtFrom) txns=txns.filter(t=>t.date>=S.filtFrom);
+  if(S.filtTo) txns=txns.filter(t=>t.date<=S.filtTo);
+  // Category filter
+  var filtered=S.filt==='all'?txns:S.filt==='__bills'?txns.filter(t=>t.isBillPayment):S.filt==='__income'?txns.filter(t=>t.txType==='income'):txns.filter(t=>t.cat===S.filt);
   return`<div style="padding:16px 16px 0">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h2 style="font-size:18px;font-weight:600">History</h2><button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h2 style="font-size:18px;font-weight:600">History</h2>
+    <div style="display:flex;gap:6px">
+      <button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button>
+      <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
+    </div>
+  </div>
   ${S.txForm?txForm():''}
-  <div style="margin-bottom:12px"><label style="margin-bottom:6px">Filter by category</label>
-  <div style="display:flex;flex-wrap:wrap;gap:6px">
-    <button data-fc="all" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='all'?'var(--bd2)':'var(--bd)'};background:${S.filt==='all'?'var(--bg2)':'var(--bg)'};color:var(--tx2)">All</button>
-    <button data-fc="__bills" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='__bills'?'var(--tx-warn)':'var(--bd)'};background:${S.filt==='__bills'?'var(--bg-warn)':'var(--bg)'};color:${S.filt==='__bills'?'var(--tx-warn)':'var(--tx2)'}">Bills</button>
-    <button data-fc="__income" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='__income'?'var(--tx-ok)':'var(--bd)'};background:${S.filt==='__income'?'var(--bg-ok)':'var(--bg)'};color:${S.filt==='__income'?'var(--tx-ok)':'var(--tx2)'}">Income</button>
-    ${cats.map(c=>{var cl=co(c.color),act=S.filt===c.id;return`<button data-fc="${c.id}" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${act?cl.c:'var(--bd)'};background:${act?cl.bg:'var(--bg)'};color:${act?cl.c:'var(--tx2)'}">${c.label}</button>`}).join('')}
-  </div></div>
+  <div style="margin-bottom:10px;display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label>From</label><input class="field" id="filt-from" type="date" value="${S.filtFrom||''}"></div>
+      <div style="flex:1"><label>To</label><input class="field" id="filt-to" type="date" value="${S.filtTo||''}"></div>
+    </div>
+    <div style="display:flex;gap:6px">
+      ${['all','chime','chimeSavings','hsa'].map(a=>{var act=S.filtAcct===a||(a==='all'&&!S.filtAcct);var label=a==='all'?'All accounts':a==='chimeSavings'?'Chime Savings':a==='chime'?'Chime':'HSA';return`<button data-fa="${a}" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${act?'var(--bd2)':'var(--bd)'};background:${act?'var(--bg2)':'var(--bg)'};color:var(--tx2)">${label}</button>`}).join('')}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <button data-fc="all" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='all'?'var(--bd2)':'var(--bd)'};background:${S.filt==='all'?'var(--bg2)':'var(--bg)'};color:var(--tx2)">All types</button>
+      <button data-fc="__bills" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='__bills'?'var(--tx-warn)':'var(--bd)'};background:${S.filt==='__bills'?'var(--bg-warn)':'var(--bg)'};color:${S.filt==='__bills'?'var(--tx-warn)':'var(--tx2)'}">Bills</button>
+      <button data-fc="__income" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${S.filt==='__income'?'var(--tx-ok)':'var(--bd)'};background:${S.filt==='__income'?'var(--bg-ok)':'var(--bg)'};color:${S.filt==='__income'?'var(--tx-ok)':'var(--tx2)'}">Income</button>
+      ${cats.map(c=>{var cl=co(c.color),act=S.filt===c.id;return`<button data-fc="${c.id}" class="tag" style="cursor:pointer;padding:5px 10px;font-size:12px;border:1px solid ${act?cl.c:'var(--bd)'};background:${act?cl.bg:'var(--bg)'};color:${act?cl.c:'var(--tx2)'}">${c.label}</button>`}).join('')}
+    </div>
+  </div>
   ${!filtered.length
     ?`<div style="text-align:center;padding:2rem;color:var(--tx2);font-size:14px;border:1px dashed var(--bd);border-radius:12px">No transactions${S.filt==='__bills'?' marked as bill payments':S.filt==='__income'?' tagged as income':S.filt!=='all'?' in this category':''} yet.</div>`
     :`<div style="display:flex;flex-direction:column;gap:6px">${filtered.map(t=>{
@@ -958,7 +980,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1012,7 +1034,7 @@ function bind(){
       S.savingsGoals=S.savingsGoals.map(g=>{
         var contrib=Math.round(sts*(g.budgetPct||0)*100)/100;
         newEnv['__sg_'+g.id]=contrib;
-        return{...g,saved:Math.round((g.saved+contrib)*100)/100};
+        return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
       });
       S.envelopes=newEnv;
       if(!S.tellerSavingsAccountId){}// savings tracked per-goal now
@@ -1036,12 +1058,12 @@ function bind(){
       S.bal=Math.round((S.bal-v)*100)/100;
       S.chimeSavingsBal=Math.round((S.chimeSavingsBal+v)*100)/100;
       var depGoalId=S.savingsDepositGoalId;
-      if(depGoalId&&depGoalId!=='__unallocated'){S.savingsGoals=S.savingsGoals.map(g=>g.id===depGoalId?{...g,saved:Math.round((g.saved+v)*100)/100}:g);}
+      if(depGoalId&&depGoalId!=='__unallocated'){S.savingsGoals=S.savingsGoals.map(g=>g.id===depGoalId?{...g,allocated:Math.round((g.allocated+v)*100)/100}:g);}
       var depName=depGoalId&&depGoalId!=='__unallocated'?(S.savingsGoals.find(g=>g.id===depGoalId)||{name:''}).name:'';
       S.txns=[{id:uid(),desc:'Transfer to savings'+(depName?' \u2014 '+depName:''),amt:-v,date:tod(),account:'chime',txType:'savings_deposit'},{id:uid(),desc:'Transfer from checking',amt:v,date:tod(),account:'chimeSavings',txType:'savings_transfer'}].concat(S.txns);
     }else{
       var wdGoalId=S.savingsWithdrawGoalId;
-      if(wdGoalId&&wdGoalId!=='__unallocated'){S.savingsGoals=S.savingsGoals.map(g=>g.id===wdGoalId?{...g,saved:Math.max(0,Math.round((g.saved-v)*100)/100)}:g);}
+      if(wdGoalId&&wdGoalId!=='__unallocated'){S.savingsGoals=S.savingsGoals.map(g=>g.id===wdGoalId?{...g,allocated:Math.max(0,Math.round((g.allocated-v)*100)/100)}:g);}
       S.chimeSavingsBal=Math.max(0,Math.round((S.chimeSavingsBal-v)*100)/100);
       S.bal=Math.round((S.bal+v)*100)/100;
       var wdName=wdGoalId&&wdGoalId!=='__unallocated'?(S.savingsGoals.find(g=>g.id===wdGoalId)||{name:''}).name:'';
@@ -1058,7 +1080,7 @@ function bind(){
     var v=parseFloat((g('allocate-amt-inp')||{}).value);
     var goalId=S.allocateGoalId;
     if(isNaN(v)||v<=0||!goalId)return;
-    S.savingsGoals=S.savingsGoals.map(g=>g.id===goalId?{...g,saved:Math.round((g.saved+v)*100)/100}:g);
+    S.savingsGoals=S.savingsGoals.map(g=>g.id===goalId?{...g,allocated:Math.round((g.allocated+v)*100)/100}:g);
     S.showAllocate=false;S.allocateGoalId=null;save();render();
   };
   var allocCancel=g('allocate-cancel');if(allocCancel)allocCancel.onclick=()=>{S.showAllocate=false;S.allocateGoalId=null;render()};
@@ -1071,7 +1093,7 @@ function bind(){
     var name=(g('gf-name').value||'').trim(),target=parseFloat(g('gf-target').value)||0;
     if(!name)return;
     if(S.editGoal){S.savingsGoals=S.savingsGoals.map(go=>go.id===S.editGoal?{...go,name,target:Math.round(target*100)/100}:go)}
-    else{S.savingsGoals=S.savingsGoals.concat([{id:uid(),name,target:Math.round(target*100)/100,saved:0}])}
+    else{S.savingsGoals=S.savingsGoals.concat([{id:uid(),name,target:Math.round(target*100)/100,allocated:0}])}
     S.goalForm=false;S.editGoal=null;save();render();
   };
   var gfCancel=g('gf-cancel');if(gfCancel)gfCancel.onclick=()=>{S.goalForm=false;S.editGoal=null;render()};
@@ -1140,6 +1162,15 @@ function bind(){
   };
   var txX=g('txX');if(txX)txX.onclick=()=>{S.txForm=false;S.txType='expense';S.txAcct='chime';render()};
   document.querySelectorAll('[data-fc]').forEach(el=>el.onclick=()=>{S.filt=el.dataset.fc;render()});
+  document.querySelectorAll('[data-fa]').forEach(el=>el.onclick=()=>{S.filtAcct=el.dataset.fa;render()});
+  var ffrom=g('filt-from');if(ffrom)ffrom.onchange=()=>{S.filtFrom=ffrom.value;render()};
+  var fto=g('filt-to');if(fto)fto.onchange=()=>{S.filtTo=fto.value;render()};
+  var resetBtn=g('reset-txns-btn');if(resetBtn)resetBtn.onclick=()=>{
+    if(!confirm('Clear ALL transactions and re-sync from Chime? This cannot be undone.'))return;
+    S.txns=[];S.tellerLastSync=null;save();
+    if(S.tellerToken&&S.tellerAccountId)tellerSync();
+    else render();
+  };
   document.querySelectorAll('[data-et]').forEach(el=>el.onclick=()=>{S.editTx=S.editTx===el.dataset.et?null:el.dataset.et;render()});
   document.querySelectorAll('[data-et-cancel]').forEach(el=>el.onclick=()=>{S.editTx=null;render()});
   document.querySelectorAll('[data-et-save]').forEach(el=>el.onclick=()=>{
@@ -1169,11 +1200,11 @@ function bind(){
     if(t.txType==='savings_withdrawal'){
       // Find the goal this withdrawal came from by matching description
       var goalName=t.desc.replace('Transfer from savings — ','').replace('Transfer from savings','').trim();
-      if(goalName){S.savingsGoals=S.savingsGoals.map(g=>g.name===goalName?{...g,saved:Math.round((g.saved+Math.abs(t.amt))*100)/100}:g);}
+      if(goalName){S.savingsGoals=S.savingsGoals.map(g=>g.name===goalName?{...g,allocated:Math.round((g.allocated+Math.abs(t.amt))*100)/100}:g);}
     }
     if(t.txType==='savings_deposit'){
       var goalNameDep=t.desc.replace('Transfer to savings — ','').replace('Transfer to savings','').trim();
-      if(goalNameDep){S.savingsGoals=S.savingsGoals.map(g=>g.name===goalNameDep?{...g,saved:Math.max(0,Math.round((g.saved-Math.abs(t.amt))*100)/100)}:g);}
+      if(goalNameDep){S.savingsGoals=S.savingsGoals.map(g=>g.name===goalNameDep?{...g,allocated:Math.max(0,Math.round((g.allocated-Math.abs(t.amt))*100)/100)}:g);}
     }
     // Note: savings_transfer transactions come in pairs — deleting one doesn't auto-delete the other
     S.txns=S.txns.filter(x=>x.id!==el.dataset.dt);
@@ -1201,7 +1232,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{}});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{}});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
