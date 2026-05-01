@@ -183,16 +183,36 @@ function openTellerConnect(){
       applicationId:'app_prp572s7pk1512s5r6000',
       onSuccess:async function(enrollment){
         S.tellerToken=enrollment.accessToken;
-        // Get accounts to find Chime checking
-        var res=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:enrollment.accessToken})});
-        var data=await res.json();
-        if(data.accounts&&data.accounts.length){
-          // Prefer checking account
-          var checking=data.accounts.find(a=>a.subtype==='checking')||data.accounts[0];
-          S.tellerAccountId=checking.id;
+        // Try to find the checking account ID
+        try{
+          var res=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:enrollment.accessToken})});
+          var data=await res.json();
+          console.log('Teller accounts response:',data);
+          if(data.accounts&&data.accounts.length){
+            var checking=data.accounts.find(a=>a.subtype==='checking')||data.accounts[0];
+            S.tellerAccountId=checking.id;
+            console.log('Using account:',checking.name,checking.id);
+          }else{
+            // Teller may return accountId directly in enrollment
+            if(enrollment.enrollment&&enrollment.enrollment.accounts&&enrollment.enrollment.accounts.length){
+              S.tellerAccountId=enrollment.enrollment.accounts[0].id;
+              console.log('Got account from enrollment:',S.tellerAccountId);
+            }
+          }
+        }catch(e){
+          console.error('getAccounts failed:',e);
+          // Try to get account from enrollment object directly
+          if(enrollment.enrollment&&enrollment.enrollment.accounts){
+            S.tellerAccountId=enrollment.enrollment.accounts[0]?.id||null;
+          }
         }
         save();
-        await tellerSync();
+        if(S.tellerAccountId){
+          await tellerSync();
+        }else{
+          console.error('Could not determine account ID. Enrollment object:',JSON.stringify(enrollment));
+          render();
+        }
       },
       onExit:function(){render()}
     });
