@@ -403,6 +403,7 @@ function openTellerConnect(){
           var res=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:enrollment.accessToken})});
           var data=await res.json();
           if(data.accounts&&data.accounts.length){
+            console.log('TELLER ACCOUNTS:', JSON.stringify(data.accounts,null,2));
             var checking=data.accounts.find(a=>a.subtype==='checking')||data.accounts.find(a=>a.type==='depository')||data.accounts[0];
             var savings=data.accounts.find(a=>a.subtype==='savings');
             if(checking)S.tellerAccountId=checking.id;
@@ -1116,10 +1117,11 @@ function parseChimeStatementText(text){
 
   if(isCombined){
     // Combined format: DATE DESCRIPTION TYPE AMOUNT ACCOUNT SETTLEMENT_DATE
+    // Teller only sees the Checking account — Chime Card is a separate Stride Bank credit account
     var re=/(\d{1,2}\/\d{1,2}\/\d{4})\s+([\s\S]*?)\s+(Round Up Transfer|Direct Debit|Transfer|Purchase|Deposit|Refund|Payment)\s+(-?\$[\d,]+\.\d{2})\s+(Checking|Chime Card|Secured Deposit Account)\s+\d{1,2}\/\d{1,2}\/\d{4}/g;
     var m;
     while((m=re.exec(text))!==null){
-      if(m[5]==='Secured Deposit Account')continue; // skip internal float account only
+      if(m[5]!=='Checking')continue; // Teller doesn't see Chime Card or Secured Deposit transactions
       var rawDesc=m[2].replace(/\s+/g,' ').trim();
       if(EXCLUDE.some(ex=>rawDesc.toLowerCase().includes(ex.toLowerCase())))continue;
       var dp=m[1].split('/');
