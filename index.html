@@ -257,19 +257,6 @@ async function tellerSync(){
       var savBalData=await savBalRes.json();
       if(savBalData.balance){
         S.chimeSavingsBal=Math.round((parseFloat(savBalData.balance.available||savBalData.balance.ledger||0))*100)/100;
-        // Auto-allocate any unallocated amount (round-ups, auto-savings) to goals by budgetPct
-        var totalAlloc=S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
-        var unalloc=Math.round((S.chimeSavingsBal-totalAlloc)*100)/100;
-        if(unalloc>0.01&&S.savingsGoals.some(g=>g.budgetPct>0)){
-          var totalGoalPct=S.savingsGoals.reduce((s,g)=>s+(g.budgetPct||0),0);
-          if(totalGoalPct>0){
-            S.savingsGoals=S.savingsGoals.map(g=>{
-              if(!g.budgetPct)return g;
-              var share=Math.round(unalloc*(g.budgetPct/totalGoalPct)*100)/100;
-              return{...g,allocated:Math.round((g.allocated+share)*100)/100};
-            });
-          }
-        }
       }
     }
 
@@ -494,7 +481,7 @@ function sharedView(d){
   if(pd){var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');up=bills.filter(b=>{var dd=new Date(b.nextDue+'T00:00:00');return dd>=now&&dd<=pdd}).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));}
   var sf=d.bal-up.reduce((s,b)=>s+b.amt,0);
   var dy=pd?(function(){var now=new Date();now.setHours(0,0,0,0);return Math.ceil((new Date(pd+'T00:00:00')-now)/86400000)})():null;
-  var lv=pd?(sf<0?'danger':sf<150?'warning':'safe'):'safe';
+  var lv=pd?(sf<20?'danger':sf<100?'warning':'safe'):'safe';
   var st=ls(lv);
   var tot=up.reduce((s,b)=>s+b.amt,0);
   var loans=d.loans||[];
@@ -716,59 +703,6 @@ function banners(){
   return h;
 }
 
-function budgetCard(){
-  var cats=gc();
-  var totalAllocated=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
-  var totalSpent=cats.reduce((s,c)=>s+spentSince(c.id),0);
-  var spentPct=totalAllocated>0?Math.min(1,totalSpent/totalAllocated):0;
-  var circ=144.51,offset=Math.round(circ*(1-spentPct));
-  var rColor=ringColor(spentPct);
-  var dy=days();
-  var pd=getPayday();
-  var prev=prevCycleStart();
-
-  if(!budgetsConfigured()||!pd){
-    return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Budget envelopes</p><p style="font-size:13px;color:var(--tx2);text-align:center;padding:12px 0">${!pd?'Add a Chime paycheck to enable budgets.':'Set up budget percentages in Bills &amp; Income to start tracking your spending.'}</p></div>`;
-  }
-
-  return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-  <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:12px">Budget envelopes</p>
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-    <svg width="60" height="60" viewBox="0 0 60 60" style="flex-shrink:0">
-      <circle cx="30" cy="30" r="23" fill="none" stroke="var(--bd)" stroke-width="7"/>
-      <circle cx="30" cy="30" r="23" fill="none" stroke="${rColor}" stroke-width="7" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" transform="rotate(-90 30 30)"/>
-      <text x="30" y="27" text-anchor="middle" font-size="9" fill="var(--tx2)" font-family="system-ui">spent</text>
-      <text x="30" y="39" text-anchor="middle" font-size="12" font-weight="500" fill="var(--tx)" font-family="'SF Mono',monospace">${Math.round(spentPct*100)}%</text>
-    </svg>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1">
-      <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Spent</p><p class="mono" style="font-size:14px;font-weight:500">${fm(totalSpent)}</p></div>
-      <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Remaining</p><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-ok)">${fm(Math.max(0,totalAllocated-totalSpent))}</p></div>
-      <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Budgeted</p><p class="mono" style="font-size:14px;font-weight:500">${fm(totalAllocated)}</p></div>
-      <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Days left</p><p class="mono" style="font-size:14px;font-weight:500">${dy!==null?dy:'--'}</p></div>
-    </div>
-  </div>
-  <div style="border-top:1px solid var(--bd);padding-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
-  ${cats.filter(c=>c.budgetPct>0).map(c=>{
-    var alloc=S.envelopes[c.id]||0;
-    var spent=spentSince(c.id);
-    var rem=Math.max(0,alloc-spent);
-    var spPct=alloc>0?Math.min(1,spent/alloc):0;
-    var dotC=co(c.color).c;
-    var amtC=tileAmtColor(rem,alloc);
-    var bC=barColor(spent,alloc);
-    var prevSpent=prev?spentBetween(c.id,prev,S.lastPaycheckDate):null;
-    var trendHtml='';
-    if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<p style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-top:2px">${diff<0?'↓':'↑'} ${pct}% vs last cycle</p>`;}
-    return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><div style="width:7px;height:7px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2)">${c.label}</p></div>
-      <p class="mono" style="font-size:16px;font-weight:500;color:${amtC}">${fm(rem)}</p>
-      <div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-top:6px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(spPct*100)}%"></div></div>
-      <p style="font-size:11px;color:var(--tx2);margin-top:3px">left of ${fm(alloc)}</p>
-      ${trendHtml}
-    </div>`;
-  }).join('')}
-  </div></div>`;
-}
 
 function savingsCard(){
   var hasTellerSavings=!!(S.tellerToken&&S.tellerSavingsAccountId);
