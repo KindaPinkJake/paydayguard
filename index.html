@@ -66,7 +66,8 @@ var S={
   merchantMemory:{},
   dismissedDupes:[],
   bulkCat:false,
-  bulkDupes:false
+  bulkDupes:false,
+  reconcileView:false,reconcileData:null,reconcileParsing:false
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -1072,7 +1073,102 @@ function loanForm(){
   var f=S.editLoan?S.loans.find(l=>l.id===S.editLoan)||{}:{};
   return`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px"><p style="font-size:14px;font-weight:500;margin-bottom:12px">${S.editLoan?'Edit loan':'New loan'}</p><input class="field" id="lfName" type="text" placeholder="Loan name" value="${f.name||''}" style="margin-bottom:8px">${S.editLoan?`<div style="display:flex;gap:8px;margin-bottom:12px"><div style="flex:1"><label>Original amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" value="${f.orig||''}"></div><div style="flex:1"><label>Current balance</label><input class="field mono" id="lfBal" type="number" step="0.01" min="0" value="${f.bal||''}"></div></div>`:`<div style="margin-bottom:12px"><label>Total loan amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" placeholder="e.g. 15000.00" style="margin-top:4px"></div>`}<div style="display:flex;gap:8px"><button class="btn" id="lfSave" style="flex:1;font-weight:500">Save loan</button><button class="btn" id="lfCancel" style="flex:1">Cancel</button></div></div>`;
 }
+function reconcileStatementTxns(stmtTxns){
+  // Build multiset of statement transactions keyed by date+cents
+  var pool=new Map();
+  stmtTxns.forEach(t=>{
+    // Try both the transaction date and ±1 day (settlement date differences)
+    var k=t.date+'|'+Math.round(t.amount*100);
+    if(!pool.has(k))pool.set(k,[]);
+    pool.get(k).push(t);
+  });
+  // Detect period from statement dates
+  var dates=stmtTxns.map(t=>t.date).sort();
+  var periodStart=dates[0],periodEnd=dates[dates.length-1];
+  // All Teller-imported Chime transactions in the period
+  var tellerTxns=S.txns.filter(t=>t.account==='chime'&&t.tellerId&&t.date>=periodStart&&t.date<=periodEnd);
+  var matched=[],dupes=[];
+  tellerTxns.forEach(t=>{
+    var cents=Math.round(t.amt*100);
+    // Try exact date first, then ±1 day for settlement differences
+    var found=false;
+    for(var delta of [0,-1,1,2,-2]){
+      var d=new Date(t.date+'T00:00:00');d.setDate(d.getDate()+delta);
+      var dk=d.toISOString().slice(0,10)+'|'+cents;
+      var bucket=pool.get(dk);
+      if(bucket&&bucket.length>0){bucket.shift();matched.push(t);found=true;break;}
+    }
+    if(!found)dupes.push(t);
+  });
+  return{dupes,matched,periodStart,periodEnd,total:tellerTxns.length};
+}
+
+async function parseStatementPDF(base64){
+  S.reconcileParsing=true;S.reconcileData=null;render();
+  try{
+    var res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      model:'claude-sonnet-4-20250514',max_tokens:2000,
+      messages:[{role:'user',content:[
+        {type:'document',source:{type:'base64',media_type:'application/pdf',data:base64}},
+        {type:'text',text:'Extract all real financial transactions from this Chime bank statement. Return ONLY a raw JSON array, no markdown fences, no explanation. Format: [{"date":"2026-04-30","description":"Subway","amount":-9.20}]. Rules: (1) EXCLUDE every row labeled "Moved from Secured Deposit Account" or "Moved to Secured Deposit Account" — these are internal Chime float transfers, not real transactions. (2) INCLUDE everything else: Purchases, Deposits, Direct Debits, Round Up Transfers, Transfer to Chime Savings Account, Instant Loan Payment. (3) Negative amounts for money out, positive for money in. (4) Date format YYYY-MM-DD.'}
+      ]}]
+    })});
+    var data=await res.json();
+    var text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+    var stmtTxns=JSON.parse(text.replace(/```json|```/g,'').trim());
+    S.reconcileData=reconcileStatementTxns(stmtTxns);
+  }catch(e){console.error('Reconcile error',e);S.reconcileData={error:e.message||'Parse failed'};}
+  S.reconcileParsing=false;render();
+}
+
+function reconcileViewHtml(){
+  if(S.reconcileParsing){
+    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px"><h2 style="font-size:18px;font-weight:600">Reconcile Statement</h2></div><div style="text-align:center;padding:48px 0"><p style="font-size:32px;margin-bottom:12px">📄</p><p style="font-size:14px;color:var(--tx2)">Analyzing statement...</p></div></div>`;
+  }
+  if(S.reconcileData&&S.reconcileData.error){
+    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-size:18px;font-weight:600">Reconcile Statement</h2><button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Back</button></div><div style="background:var(--bg-err);border:1px solid var(--bd-err);border-radius:12px;padding:16px"><p style="color:var(--tx-err)">Error: ${S.reconcileData.error}</p></div></div>`;
+  }
+  if(S.reconcileData){
+    var d=S.reconcileData;
+    return`<div style="padding:16px 16px 0">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div><h2 style="font-size:18px;font-weight:600">Reconcile Results</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${fd(d.periodStart)} – ${fd(d.periodEnd)}</p></div>
+      <div style="display:flex;gap:6px">
+        ${d.dupes&&d.dupes.length?`<button class="btn" id="rec-delete-all-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Delete all (${d.dupes.length})</button>`:''}
+        <button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Done</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+      <div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:10px;padding:12px;text-align:center"><p class="mono" style="font-size:22px;font-weight:600;color:var(--tx-ok)">${d.matched?d.matched.length:0}</p><p style="font-size:11px;color:var(--tx-ok)">matched</p></div>
+      <div style="background:${d.dupes&&d.dupes.length?'var(--bg-err)':'var(--bg-ok)'};border:1px solid ${d.dupes&&d.dupes.length?'var(--bd-err)':'var(--bd-ok)'};border-radius:10px;padding:12px;text-align:center"><p class="mono" style="font-size:22px;font-weight:600;color:${d.dupes&&d.dupes.length?'var(--tx-err)':'var(--tx-ok)'}">${d.dupes?d.dupes.length:0}</p><p style="font-size:11px;color:${d.dupes&&d.dupes.length?'var(--tx-err)':'var(--tx-ok)'}">not in statement</p></div>
+    </div>
+    ${d.dupes&&d.dupes.length?`
+    <p style="font-size:13px;font-weight:500;margin-bottom:8px;color:var(--tx-err)">Not in statement — likely duplicates</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+    ${d.dupes.map(t=>`<div style="background:var(--bg);border:1px solid var(--bd-err);border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+      <div><p style="font-size:13px;font-weight:500">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}</p></div>
+      <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(t.amt)}</p><button class="btn" data-rec-del="${t.id}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+    </div>`).join('')}
+    </div>`:'<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:24px;text-align:center;margin-bottom:16px"><p style="font-size:24px;margin-bottom:8px">🎉</p><p style="font-size:14px;color:var(--tx-ok)">All transactions match the statement — no dupes found!</p></div>'}
+    </div>`;
+  }
+  // Upload state
+  return`<div style="padding:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:18px;font-weight:600">Reconcile Statement</h2>
+    <button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Back</button>
+  </div>
+  <div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:20px">
+    <p style="font-size:14px;font-weight:500;margin-bottom:6px">Upload a Chime PDF statement</p>
+    <p style="font-size:12px;color:var(--tx2);margin-bottom:16px">Claude will parse the statement and find any Teller transactions that don't appear in it — those are confirmed duplicates you can delete.</p>
+    <input type="file" id="rec-pdf-input" accept=".pdf" style="display:none">
+    <button class="btn" id="rec-upload-btn" style="width:100%;font-weight:500;color:var(--tx-info);border-color:var(--bd)">📄 Choose PDF statement</button>
+  </div>
+  </div>`;
+}
+
 function historyView(){
+  if(S.reconcileView)return reconcileViewHtml();
   var cats=gc();
   var uncatCount=(()=>{
     var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
@@ -1174,6 +1270,7 @@ function historyView(){
       <button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button>
       ${uncatCount>5?`<button class="btn" id="bulk-cat-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Bulk (${uncatCount})</button>`:''}
       ${(()=>{var dp=allSuspectedDupes();var grps=new Map();dp.forEach(d=>{var k=(d.a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');if(!grps.has(k))grps.set(k,[]);grps.get(k).push(d);});var bulkPairs=Array.from(grps.values()).filter(g=>g.length>=2).reduce((s,g)=>s+g.length,0);return bulkPairs>0?`<button class="btn" id="bulk-dupes-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Dupes (${bulkPairs})</button>`:''})()}      <button class="btn" id="export-csv-btn" style="font-size:13px;padding:6px 12px;color:var(--tx2)">↓ CSV</button>
+      <button class="btn" id="reconcile-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-info);border-color:var(--bd)">Reconcile</button>
       <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
     </div>
   </div>
@@ -1244,7 +1341,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkDupes=false;S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkDupes=false;S.reconcileView=false;S.reconcileData=null;S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1462,6 +1559,34 @@ function bind(){
   var cc=g('catCancel');if(cc)cc.onclick=()=>{S.catForm=false;S.editCat=null;render()};
 
   function ttf(){S.txForm=!S.txForm;render()}
+  var reconcileBtn=g('reconcile-btn');if(reconcileBtn)reconcileBtn.onclick=()=>{S.reconcileView=true;S.reconcileData=null;render()};
+  var recBackBtn=g('rec-back-btn');if(recBackBtn)recBackBtn.onclick=()=>{S.reconcileView=false;S.reconcileData=null;render()};
+  var recUploadBtn=g('rec-upload-btn');if(recUploadBtn)recUploadBtn.onclick=()=>g('rec-pdf-input').click();
+  var recPdfInput=g('rec-pdf-input');if(recPdfInput)recPdfInput.onchange=e=>{
+    var file=e.target.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=ev=>{var b64=ev.target.result.split(',')[1];parseStatementPDF(b64);};
+    reader.readAsDataURL(file);
+  };
+  var recDeleteAll=g('rec-delete-all-btn');if(recDeleteAll)recDeleteAll.onclick=()=>{
+    if(!S.reconcileData||!S.reconcileData.dupes||!S.reconcileData.dupes.length)return;
+    if(!confirm('Delete all '+S.reconcileData.dupes.length+' unmatched transactions? These are not in your statement.'))return;
+    S.reconcileData.dupes.forEach(t=>{
+      if(t.cat){var env=S.envelopes[t.cat]||0;S.envelopes={...S.envelopes,[t.cat]:Math.round((env+Math.abs(t.amt))*100)/100};}
+      adjAcct(t.account||'chime',-t.amt);
+      S.txns=S.txns.filter(x=>x.id!==t.id);
+    });
+    S.reconcileData={...S.reconcileData,dupes:[],matched:(S.reconcileData.matched||[])};
+    save();render();
+  };
+  document.querySelectorAll('[data-rec-del]').forEach(el=>el.onclick=()=>{
+    var t=S.txns.find(x=>x.id===el.dataset.recDel);if(!t)return;
+    if(t.cat){var env=S.envelopes[t.cat]||0;S.envelopes={...S.envelopes,[t.cat]:Math.round((env+Math.abs(t.amt))*100)/100};}
+    adjAcct(t.account||'chime',-t.amt);
+    S.txns=S.txns.filter(x=>x.id!==t.id);
+    if(S.reconcileData)S.reconcileData={...S.reconcileData,dupes:S.reconcileData.dupes.filter(x=>x.id!==t.id)};
+    save();render();
+  });
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
   document.querySelectorAll('[data-del-dupe-group]').forEach(el=>el.onclick=()=>{
     var entries=el.dataset.delDupeGroup.split('||||');
@@ -1617,7 +1742,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[],bulkCat:false,bulkDupes:false});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[],bulkCat:false,bulkDupes:false,reconcileView:false,reconcileData:null,reconcileParsing:false});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
