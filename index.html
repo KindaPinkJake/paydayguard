@@ -96,6 +96,22 @@ function getPayday(){
   if(!chimeChecks.length)return'';
   return chimeChecks.map(p=>p.nextDate).sort()[0];
 }
+function deduplicateTxns(){
+  var before=S.txns.length;
+  var seen=new Map();
+  S.txns=S.txns.filter(t=>{
+    var key=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
+    if(!seen.has(key)){seen.set(key,t);return true;}
+    var prev=seen.get(key);
+    // Prefer the entry with a tellerId
+    if(t.tellerId&&!prev.tellerId){seen.set(key,t);return true;}
+    return false;
+  });
+  var kept=new Set(seen.values());
+  S.txns=S.txns.filter(t=>kept.has(t));
+  return S.txns.length<before;
+}
+
 function startListener(){
   if(unsub)unsub();
   var firstLoad=true;
@@ -134,12 +150,10 @@ function startListener(){
     // One-time migration: fix income transactions on first load
     if(firstLoad){
       var changed=false;
-      // Fix transactions tagged as income but stored negative
       S.txns=S.txns.map(t=>{
         if(t.txType==='income'&&t.amt<0){changed=true;return{...t,amt:Math.abs(t.amt)};}
         return t;
       });
-      // Fix transactions from Chime that match paycheck descriptions but are negative and untagged
       var pcWords=S.paychecks.filter(p=>p.account==='chime').map(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
       S.txns=S.txns.map(t=>{
         if(t.amt>=0||(t.account&&t.account!=='chime')||t.txType)return t;
@@ -150,26 +164,7 @@ function startListener(){
       });
       if(changed)save();
     }
-    // One-time dedup: collapse pending→settled duplicates (same desc+date+amount, keep tellerId version)
-    if(firstLoad){
-      var beforeLen=S.txns.length;
-      var seen=new Map();
-      S.txns=S.txns.filter(t=>{
-        var key=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
-        if(!seen.has(key)){seen.set(key,t);return true;}
-        var existing=seen.get(key);
-        if(t.tellerId&&!existing.tellerId){
-          // Replace the kept one with the tellerId version
-          seen.set(key,t);
-          return true;
-        }
-        return false;
-      });
-      // Second pass: remove any entries that were superseded above
-      var kept=new Set(seen.values());
-      S.txns=S.txns.filter(t=>kept.has(t));
-      if(S.txns.length<beforeLen)save();
-    }
+    deduplicateTxns();
     if(firstLoad&&S.tellerToken&&S.tellerAccountId){
       firstLoad=false;
       tellerSync();
@@ -224,15 +219,6 @@ async function tellerSync(){
     var txRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId,count:500})});
     var txData=await txRes.json();
     if(txData.transactions&&txData.transactions.length){
-      // DEBUG: log raw Teller data to understand status/amount fields
-      console.log('TELLER RAW SAMPLE (first 10):');
-      txData.transactions.slice(0,10).forEach(t=>console.log(JSON.stringify({id:t.id,date:t.date,amount:t.amount,status:t.status,type:t.type,desc:t.description})));
-      var dupeCheck={};
-      txData.transactions.forEach(t=>{
-        var key=t.date+'|'+t.amount+'|'+(t.description||'').trim();
-        if(dupeCheck[key])console.log('TELLER DUPE:',JSON.stringify({id:t.id,date:t.date,amount:t.amount,status:t.status,desc:t.description}),'vs',JSON.stringify({id:dupeCheck[key].id,status:dupeCheck[key].status}));
-        else dupeCheck[key]=t;
-      });
       var existing=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
       // Fix existing Teller transactions that were misclassified before income detection was added
       S.txns=S.txns.map(t=>{
@@ -352,6 +338,7 @@ async function tellerSync(){
       }
     }
 
+    deduplicateTxns();
     S.tellerLastSync=new Date().toISOString();
     save();
   }catch(e){console.error('Teller sync error',e)}
