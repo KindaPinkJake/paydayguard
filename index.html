@@ -88,6 +88,44 @@ function spentSince(catId){
   if(!S.lastPaycheckDate)return 0;
   return S.txns.filter(t=>t.cat===catId&&t.date>=S.lastPaycheckDate&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0);
 }
+function spentBetween(catId,from,to){
+  return S.txns.filter(t=>t.cat===catId&&t.date>=from&&t.date<to&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0);
+}
+function prevCycleStart(){
+  if(!S.lastPaycheckDate)return null;
+  var pcWords=S.paychecks.filter(p=>p.account==='chime').flatMap(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
+  if(!pcWords.length)return null;
+  var prev=S.txns.filter(t=>t.txType==='income'&&t.account==='chime'&&t.date<S.lastPaycheckDate&&pcWords.some(w=>(t.desc||'').toLowerCase().includes(w))).sort((a,b)=>b.date.localeCompare(a.date));
+  return prev.length?prev[0].date:null;
+}
+function isBillPaid(billId){
+  if(!S.lastPaycheckDate)return false;
+  return S.txns.some(t=>t.isBillPayment&&t.billId===billId&&t.date>=S.lastPaycheckDate);
+}
+function savingsRate(){
+  if(!S.lastPaycheckDate)return null;
+  var income=S.txns.filter(t=>t.txType==='income'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+t.amt,0);
+  var expenses=S.txns.filter(t=>t.amt<0&&t.date>=S.lastPaycheckDate&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.account!=='chimeSavings').reduce((s,t)=>s+Math.abs(t.amt),0);
+  if(income<=0)return null;
+  return Math.max(0,Math.round((1-expenses/income)*100));
+}
+function paycheckHistory(){
+  var pcWords=S.paychecks.filter(p=>p.account==='chime').flatMap(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
+  return S.txns.filter(t=>t.txType==='income'&&t.account==='chime'&&(pcWords.length===0||pcWords.some(w=>(t.desc||'').toLowerCase().includes(w)))).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
+}
+function exportCSV(){
+  var cats=gc();
+  var rows=[['Date','Description','Amount','Account','Category','Type']];
+  S.txns.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(t=>{
+    var cat=t.cat?(cats.find(c=>c.id===t.cat)||{label:''}).label:'';
+    var type=t.isBillPayment?'bill':t.txType||'expense';
+    rows.push([t.date,'"'+(t.desc||'').replace(/"/g,'""')+'"',t.amt,acctLabel(t.account||'chime'),cat,type]);
+  });
+  var csv=rows.map(r=>r.join(',')).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');a.href=url;a.download='paydayguard-transactions.csv';a.click();URL.revokeObjectURL(url);
+}
 function totalPct(){return gc().reduce((s,c)=>s+(c.budgetPct||0),0)+S.savingsGoals.reduce((s,g)=>s+(g.budgetPct||0),0)}
 function budgetsConfigured(){return totalPct()>0}
 function ringColor(pct){return pct>0.85?'var(--tx-err)':pct>0.6?'var(--tx-warn)':'var(--tx-ok)'}
@@ -624,6 +662,7 @@ function budgetCard(){
   var rColor=ringColor(spentPct);
   var dy=days();
   var pd=getPayday();
+  var prev=prevCycleStart();
 
   if(!budgetsConfigured()||!pd){
     return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Budget envelopes</p><p style="font-size:13px;color:var(--tx2);text-align:center;padding:12px 0">${!pd?'Add a Chime paycheck to enable budgets.':'Set up budget percentages in Bills &amp; Income to start tracking your spending.'}</p></div>`;
@@ -654,11 +693,15 @@ function budgetCard(){
     var dotC=co(c.color).c;
     var amtC=tileAmtColor(rem,alloc);
     var bC=barColor(spent,alloc);
+    var prevSpent=prev?spentBetween(c.id,prev,S.lastPaycheckDate):null;
+    var trendHtml='';
+    if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<p style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-top:2px">${diff<0?'↓':'↑'} ${pct}% vs last cycle</p>`;}
     return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><div style="width:7px;height:7px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2)">${c.label}</p></div>
       <p class="mono" style="font-size:16px;font-weight:500;color:${amtC}">${fm(rem)}</p>
       <div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-top:6px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(spPct*100)}%"></div></div>
       <p style="font-size:11px;color:var(--tx2);margin-top:3px">left of ${fm(alloc)}</p>
+      ${trendHtml}
     </div>`;
   }).join('')}
   </div></div>`;
@@ -811,7 +854,8 @@ function homeView(){
     <p class="mono" style="font-size:36px;font-weight:600;color:${st.c}">${fm(sf)}</p>
     <p style="font-size:12px;margin-top:4px;color:${st.c};opacity:.8">${up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income'}</p>
   </div>
-  ${up.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Due before payday</p><div style="display:flex;flex-direction:column;gap:6px">${up.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px"><p style="font-size:14px">${b.name}</p><div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err)">${fm(b.amt)}</p><p style="font-size:11px;color:var(--tx2)">${fd(b.nextDue)}</p></div></div>`).join('')}</div></div>`:''}
+  ${up.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Due before payday</p><div style="display:flex;flex-direction:column;gap:6px">${up.map(b=>{var paid=isBillPaid(b.id);return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid ${paid?'var(--bd-ok)':'var(--bd)'};border-radius:8px;padding:10px 14px;${paid?'opacity:.75':''}"><p style="font-size:14px;color:${paid?'var(--tx-ok)':'var(--tx)'}">${b.name}</p><div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:${paid?'var(--tx-ok)':'var(--tx-err)'}">${paid?'✓ ':''} ${fm(b.amt)}</p><p style="font-size:11px;color:var(--tx2)">${fd(b.nextDue)}</p></div></div>`;}).join('')}</div></div>`:''}
+  ${(()=>{var sr=savingsRate();return sr!==null?`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;margin-bottom:10px"><p style="font-size:12px;color:var(--tx2)">Savings rate this cycle</p><p class="mono" style="font-size:15px;font-weight:500;color:${sr>=20?'var(--tx-ok)':sr>=10?'var(--tx-warn)':'var(--tx-err)'}">${sr}%</p></div>`:''})()}
   ${budgetCard()}
   ${loansHome()}
   <button class="btn" id="txBtn" style="width:100%;margin-bottom:12px;font-size:14px">+ Log transaction</button>
@@ -864,6 +908,8 @@ function billsView(){
   <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
   ${S.paychecks.map(p=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><p style="font-size:15px;font-weight:500">${p.name}</p><p class="mono" style="font-size:18px;font-weight:500;color:var(--tx-ok)">+${fm(p.amt)}</p></div><div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${acctTag(p.account)}<span style="font-size:12px;color:var(--tx2)">${p.freq||'biweekly'} • next ${fd(p.nextDate)}</span></div><div style="display:flex;gap:6px"><button class="btn" data-ep="${p.id}" style="font-size:12px;padding:4px 10px">Edit</button><button class="btn" data-delp="${p.id}" style="font-size:12px;padding:4px 10px;color:var(--tx-err)">Delete</button></div></div></div>`).join('')}
   </div>
+
+  ${(()=>{var hist=paycheckHistory();return hist.length>1?`<div style="margin-bottom:16px"><p style="font-size:14px;font-weight:500;margin-bottom:8px">Paycheck history</p><div style="display:flex;flex-direction:column;gap:6px">${hist.map((t,i)=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">${i===0?`<span style="font-size:11px;background:var(--bg-ok);color:var(--tx-ok);padding:2px 6px;border-radius:4px;margin-right:8px">Latest</span>`:'<span style="font-size:11px;color:var(--tx2);margin-right:8px;min-width:28px">'+fd(t.date)+'</span>'}<p style="font-size:13px;flex:1">${t.desc}</p><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-ok)">+${fm(t.amt)}</p></div>`).join('')}</div></div>`:'';})()}
 
   <div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px">
     <p style="font-size:14px;font-weight:500;margin-bottom:4px">Budget &amp; categories</p>
@@ -1053,6 +1099,7 @@ function historyView(){
     <div style="display:flex;gap:6px">
       <button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button>
       ${uncatCount>5?`<button class="btn" id="bulk-cat-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Bulk (${uncatCount})</button>`:''}
+      <button class="btn" id="export-csv-btn" style="font-size:13px;padding:6px 12px;color:var(--tx2)">↓ CSV</button>
       <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
     </div>
   </div>
@@ -1175,7 +1222,17 @@ function bind(){
       S.txns=S.txns.map(t=>t.id===txId?{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined}:t);
       S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
     }
-    S.billAssignTxId=null;save();render();
+    S.billAssignTxId=null;
+    // Variance check — only for single transaction assignments, not bulk
+    if(!S.bulkCat&&tx){
+      var txAmt=Math.abs(tx.amt),billAmt=bill.amt,variance=Math.abs(txAmt-billAmt);
+      if(variance>1&&billAmt>0&&variance/billAmt>0.03){
+        if(confirm('Transaction is '+fm(txAmt)+' but bill is stored as '+fm(billAmt)+'. Update stored amount to '+fm(txAmt)+'?')){
+          S.bills=S.bills.map(b=>b.id===billId?{...b,amt:Math.round(txAmt*100)/100}:b);
+        }
+      }
+    }
+    save();render();
   });
 
   document.querySelectorAll('[data-pc-apply]').forEach(el=>el.onclick=()=>{
@@ -1315,6 +1372,7 @@ function bind(){
   var cc=g('catCancel');if(cc)cc.onclick=()=>{S.catForm=false;S.editCat=null;render()};
 
   function ttf(){S.txForm=!S.txForm;render()}
+  var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
   document.querySelectorAll('[data-bulk-assign]').forEach(el=>el.onclick=()=>{
