@@ -637,7 +637,7 @@ function suggestCategory(desc){
   return null;
 }
 
-var SAVINGS_TRANSFER_KEYWORDS=['save when you spend','round up','roundup','automatic savings','savings transfer','move money','transfer to savings','transfer from savings','chime transfer','move to spending'];
+var SAVINGS_TRANSFER_KEYWORDS=['save when you spend','round up','roundup','automatic savings','savings transfer','move money','transfer to savings','transfer from savings','chime transfer','move to spending','chime savings account','to chime savings','instant loan payment'];
 
 function isSavingsTransfer(desc){
   if(!desc)return false;
@@ -1086,7 +1086,7 @@ function reconcileStatementTxns(stmtTxns){
   var dates=stmtTxns.map(t=>t.date).sort();
   var periodStart=dates[0],periodEnd=dates[dates.length-1];
   // All Teller-imported Chime transactions in the period
-  var tellerTxns=S.txns.filter(t=>t.account==='chime'&&t.tellerId&&t.date>=periodStart&&t.date<=periodEnd&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.amt<0);
+  var tellerTxns=S.txns.filter(t=>t.account==='chime'&&t.tellerId&&t.date>=periodStart&&t.date<=periodEnd&&t.txType!=='income'&&t.txType!=='savings_transfer'&&!t.isLoanPayment&&t.amt<0);
   var matched=[],dupes=[];
   tellerTxns.forEach(t=>{
     var cents=Math.round(t.amt*100);
