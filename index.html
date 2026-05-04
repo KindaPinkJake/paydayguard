@@ -669,6 +669,25 @@ function banners(){
       ${(S.loanAssignTxId===unc.id||unc.suggestedLoanId)&&S.loans.length?`<div style="margin-top:4px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedLoanId?'Looks like this loan:':'Which loan is this for?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.loans.map(l=>{var isSug=l.id===unc.suggestedLoanId;return`<button data-loan-assign="${unc.id}" data-loan-id="${l.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-info);background:var(--bg-info);':''}"><span>${isSug?'✓ ':''} ${l.name}</span><span class="mono" style="color:var(--tx-err)">${fm(l.bal)} remaining</span></button>`;}).join('')}</div></div>`:''}
     </div>`;
   }
+  // Suspected duplicate banner
+  var dupe=firstSuspectedDupe();
+  if(dupe){
+    h+=`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <p style="font-size:13px;font-weight:600;color:var(--tx-warn);margin-bottom:4px">⚠ Possible duplicate charge</p>
+    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Same merchant, ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart — is one a duplicate?</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+        <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
+        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.a.amt)}</p><button class="btn" data-del-dupe="${dupe.a.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+      </div>
+      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+        <div><p style="font-size:13px;font-weight:500">${dupe.b.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.b.date)}</p></div>
+        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.b.amt)}</p><button class="btn" data-del-dupe="${dupe.b.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+      </div>
+    </div>
+    <button class="btn" data-dismiss-dupe="${dupe.pairKey}" style="width:100%;font-size:12px;padding:6px;color:var(--tx2)">Both are real — keep both</button>
+  </div>`;
+  }
   return h;
 }
 
@@ -852,21 +871,6 @@ function homeView(){
   </div>`:''}
   <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">${bcard('Chime','chime',S.bal)}${bcard('HSA','hsa',S.hsa)}</div>
   ${savingsCard()}
-  ${(()=>{var dupe=firstSuspectedDupe();return dupe?`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-    <p style="font-size:13px;font-weight:600;color:var(--tx-warn);margin-bottom:4px">⚠ Possible duplicate charge</p>
-    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Same merchant, ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart — is one a duplicate?</p>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-        <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
-        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.a.amt)}</p><button class="btn" data-del-dupe="${dupe.a.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
-      </div>
-      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-        <div><p style="font-size:13px;font-weight:500">${dupe.b.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.b.date)}</p></div>
-        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.b.amt)}</p><button class="btn" data-del-dupe="${dupe.b.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
-      </div>
-    </div>
-    <button class="btn" data-dismiss-dupe="${dupe.pairKey}" style="width:100%;font-size:12px;padding:6px;color:var(--tx2)">Both are real — keep both</button>
-  </div>`:'';})()}
   ${msg?`<div style="background:${st.bg};border:1px solid ${st.br};border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:${st.c}">${msg}</div>`:''}
   <div style="border-radius:12px;padding:16px;margin-bottom:10px;border:1px solid ${st.br};background:${st.bg}">
     <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:${st.c};margin-bottom:4px">Safe to spend</p>
@@ -877,7 +881,6 @@ function homeView(){
   ${(()=>{var sr=savingsRate();return sr!==null?`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;margin-bottom:10px"><p style="font-size:12px;color:var(--tx2)">Savings rate this cycle</p><p class="mono" style="font-size:15px;font-weight:500;color:${sr>=20?'var(--tx-ok)':sr>=10?'var(--tx-warn)':'var(--tx-err)'}">${sr}%</p></div>`:''})()}
   ${budgetCard()}
   ${loansHome()}
-  <button class="btn" id="txBtn" style="width:100%;margin-bottom:12px;font-size:14px">+ Log transaction</button>
   ${S.txForm?txForm():''}
   </div>`;
 }
