@@ -64,7 +64,8 @@ var S={
   billAssignTxId:null,editTx:null,
   goalForm:false,editGoal:null,
   merchantMemory:{},
-  dismissedDupes:[]
+  dismissedDupes:[],
+  bulkCat:false
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -165,9 +166,9 @@ function startListener(){
         if(isPaycheck){changed=true;return{...t,amt:Math.abs(t.amt),txType:'income'};}
         return t;
       });
+    deduplicateTxns();
       if(changed)save();
     }
-    deduplicateTxns();
     if(firstLoad&&S.tellerToken&&S.tellerAccountId){
       firstLoad=false;
       tellerSync();
@@ -390,7 +391,7 @@ function upcoming(){
 }
 function safe(){return S.bal-upcoming().reduce((s,b)=>s+b.amt,0)}
 function days(){var pd=getPayday();if(!pd)return null;var now=new Date();now.setHours(0,0,0,0);return Math.ceil((new Date(pd+'T00:00:00')-now)/86400000)}
-function showLevel(v){if(!getPayday())return'safe';return v<0?'danger':v<150?'warning':'safe'}
+function showLevel(v){if(!getPayday())return'safe';return v<20?'danger':v<100?'warning':'safe'}
 function ls(l){return{danger:{c:'var(--tx-err)',bg:'var(--bg-err)',br:'var(--bd-err)'},warning:{c:'var(--tx-warn)',bg:'var(--bg-warn)',br:'var(--bd-warn)'},safe:{c:'var(--tx-ok)',bg:'var(--bg-ok)',br:'var(--bd-ok)'}}[l]}
 function billsToday(){return[]} // Bills handled via Teller transaction categorization
 function pcsToday(){
@@ -1001,6 +1002,40 @@ function loanForm(){
 }
 function historyView(){
   var cats=gc();
+  var uncatCount=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings').length;
+
+  // Bulk categorize view
+  if(S.bulkCat){
+    var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
+    // Group by normalized merchant (first 4 words, matching merchantKey) + exact amount
+    var groups=new Map();
+    uncat.forEach(t=>{
+      var merchant=merchantKey(t.desc);
+      var key=merchant+'|'+t.amt;
+      if(!groups.has(key))groups.set(key,{merchant:t.desc,amt:t.amt,txns:[]});
+      groups.get(key).txns.push(t);
+    });
+    var groupArr=Array.from(groups.values()).sort((a,b)=>b.txns.length-a.txns.length);
+    return`<div style="padding:16px 16px 0">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div><h2 style="font-size:18px;font-weight:600">Bulk Categorize</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${groupArr.length} groups · ${uncat.length} transactions</p></div>
+      <button class="btn" id="bulk-done-btn" style="font-size:13px;padding:6px 14px">Done</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+    ${groupArr.map(grp=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <p style="font-size:14px;font-weight:500">${grp.merchant}</p>
+        <div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err)">${fm(grp.amt)}</p><p style="font-size:11px;color:var(--tx2)">${grp.txns.length}×</p></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${cats.map(c=>{var cl=co(c.color);return`<button data-bulk-assign data-merchant="${grp.merchant}" data-amt="${grp.amt}" data-cat="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label} (${grp.txns.length})</button>`}).join('')}
+        <button data-bulk-bill data-merchant="${grp.merchant}" data-amt="${grp.amt}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid var(--bd-warn);background:var(--bg-warn);color:var(--tx-warn)">Bill payment</button>
+      </div>
+    </div>`).join('')}
+    ${groupArr.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">All caught up! 🎉</p>':''}
+    </div></div>`;
+  }
+
   var txns=S.txns;
   // Hide savings transfer transactions by default — only show when filtering Chime Savings
   var showSavings=S.filtAcct==='chimeSavings';
@@ -1017,6 +1052,7 @@ function historyView(){
     <h2 style="font-size:18px;font-weight:600">History</h2>
     <div style="display:flex;gap:6px">
       <button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button>
+      ${uncatCount>5?`<button class="btn" id="bulk-cat-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Bulk (${uncatCount})</button>`:''}
       <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
     </div>
   </div>
@@ -1087,7 +1123,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1124,8 +1160,21 @@ function bind(){
     if(!bill)return;
     var tx=S.txns.find(t=>t.id===txId);
     if(tx&&tx.desc){var key=merchantKey(tx.desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__bill:'+billId};}
-    S.txns=S.txns.map(t=>t.id===txId?{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined}:t);
-    S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+    // If in bulk mode, apply to all matching transactions (same merchantKey + amount)
+    if(S.bulkCat&&tx){
+      var mKey=merchantKey(tx.desc);
+      var firstDone=false;
+      S.txns=S.txns.map(t=>{
+        if(merchantKey(t.desc)===mKey&&t.amt===tx.amt&&!t.isBillPayment){
+          if(!firstDone){firstDone=true;S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);}
+          return{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined};
+        }
+        return t;
+      });
+    }else{
+      S.txns=S.txns.map(t=>t.id===txId?{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined}:t);
+      S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+    }
     S.billAssignTxId=null;save();render();
   });
 
@@ -1149,7 +1198,7 @@ function bind(){
     }else{
       S.hsa=Math.round((S.hsa+v)*100)/100;
     }
-    S.txns=[{id:uid(),desc:p.name,amt:v,date:tod(),account:p.account}].concat(S.txns);
+    S.txns=[{id:uid(),desc:p.name,amt:v,date:tod(),account:p.account,txType:'income'}].concat(S.txns);
     S.paychecks=S.paychecks.map(x=>x.id===pid?{...x,nextDate:advPc(x)}:x);
     S.disPcs=S.disPcs.concat([pid]);save();render();
   });
@@ -1173,6 +1222,7 @@ function bind(){
     S.dismissedDupes=[...S.dismissedDupes,el.dataset.dismissDupe];
     save();render();
   });
+  document.querySelectorAll('[data-deposit-goal]').forEach(el=>el.onclick=()=>{S.savingsDepositGoalId=el.dataset.depositGoal;render()});
   document.querySelectorAll('[data-withdraw-goal]').forEach(el=>el.onclick=()=>{S.savingsWithdrawGoalId=el.dataset.withdrawGoal;render()});
   var asSave=g('savings-amt-save');if(asSave)asSave.onclick=()=>{
     var v=parseFloat((g('savings-amt-inp')||{}).value);if(isNaN(v)||v<=0)return;
@@ -1182,14 +1232,14 @@ function bind(){
       var depGoalId=S.savingsDepositGoalId;
       if(depGoalId&&depGoalId!=='__unallocated'){S.savingsGoals=S.savingsGoals.map(g=>g.id===depGoalId?{...g,allocated:Math.round((g.allocated+v)*100)/100}:g);}
       var depName=depGoalId&&depGoalId!=='__unallocated'?(S.savingsGoals.find(g=>g.id===depGoalId)||{name:''}).name:'';
-      S.txns=[{id:uid(),desc:'Transfer to savings'+(depName?' \u2014 '+depName:''),amt:-v,date:tod(),account:'chime',txType:'savings_deposit'},{id:uid(),desc:'Transfer from checking',amt:v,date:tod(),account:'chimeSavings',txType:'savings_transfer'}].concat(S.txns);
+      S.txns=[{id:uid(),desc:'Transfer to savings'+(depName?' \u2014 '+depName:''),amt:-v,date:tod(),account:'chime',txType:'savings_deposit'}].concat(S.txns);
     }else{
       var wdGoalId=S.savingsWithdrawGoalId;
       if(wdGoalId&&wdGoalId!=='__unallocated'){S.savingsGoals=S.savingsGoals.map(g=>g.id===wdGoalId?{...g,allocated:Math.max(0,Math.round((g.allocated-v)*100)/100)}:g);}
       S.chimeSavingsBal=Math.max(0,Math.round((S.chimeSavingsBal-v)*100)/100);
       S.bal=Math.round((S.bal+v)*100)/100;
       var wdName=wdGoalId&&wdGoalId!=='__unallocated'?(S.savingsGoals.find(g=>g.id===wdGoalId)||{name:''}).name:'';
-      S.txns=[{id:uid(),desc:'Transfer from savings'+(wdName?' \u2014 '+wdName:''),amt:v,date:tod(),account:'chime',txType:'savings_withdrawal'},{id:uid(),desc:'Transfer to checking',amt:-v,date:tod(),account:'chimeSavings',txType:'savings_transfer'}].concat(S.txns);
+      S.txns=[{id:uid(),desc:'Transfer from savings'+(wdName?' \u2014 '+wdName:''),amt:v,date:tod(),account:'chime',txType:'savings_withdrawal'}].concat(S.txns);
     }
     S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;save();render();
   };
@@ -1265,7 +1315,25 @@ function bind(){
   var cc=g('catCancel');if(cc)cc.onclick=()=>{S.catForm=false;S.editCat=null;render()};
 
   function ttf(){S.txForm=!S.txForm;render()}
-  var t1=g('txBtn');if(t1)t1.onclick=ttf;var t2=g('txBtn2');if(t2)t2.onclick=ttf;
+  var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
+  var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
+  document.querySelectorAll('[data-bulk-assign]').forEach(el=>el.onclick=()=>{
+    var merchant=el.dataset.merchant,amt=parseFloat(el.dataset.amt),catId=el.dataset.cat;
+    var key=merchantKey(merchant);
+    if(key)S.merchantMemory={...S.merchantMemory,[key]:catId};
+    S.txns=S.txns.map(t=>{
+      if(merchantKey(t.desc)===key&&t.amt===amt&&!t.cat&&!t.isBillPayment)return{...t,cat:catId};
+      return t;
+    });
+    save();render();
+  });
+  document.querySelectorAll('[data-bulk-bill]').forEach(el=>el.onclick=()=>{
+    var merchant=el.dataset.merchant,amt=parseFloat(el.dataset.amt);
+    var key=merchantKey(merchant);
+    var firstMatch=S.txns.find(t=>merchantKey(t.desc)===key&&t.amt===amt&&!t.isBillPayment);
+    if(firstMatch){S.billAssignTxId=firstMatch.id;}
+    render();
+  });
   var txE=g('txE');if(txE)txE.onclick=()=>{S.txType='expense';render()};
   var txI=g('txI');if(txI)txI.onclick=()=>{S.txType='income';render()};
   var txAs=g('txAcctSel');if(txAs)txAs.onchange=()=>{S.txAcct=txAs.value};
@@ -1318,17 +1386,21 @@ function bind(){
   });
   document.querySelectorAll('[data-dt]').forEach(el=>el.onclick=()=>{
     var t=S.txns.find(x=>x.id===el.dataset.dt);if(!t)return;
+    // Reverse the account balance effect
     adjAcct(t.account||'chime',-t.amt);
-    if(t.txType==='savings_withdrawal'){
-      // Find the goal this withdrawal came from by matching description
-      var goalName=t.desc.replace('Transfer from savings — ','').replace('Transfer from savings','').trim();
-      if(goalName){S.savingsGoals=S.savingsGoals.map(g=>g.name===goalName?{...g,allocated:Math.round((g.allocated+Math.abs(t.amt))*100)/100}:g);}
-    }
+    // For savings transfers, also reverse the savings balance and goal allocation
     if(t.txType==='savings_deposit'){
-      var goalNameDep=t.desc.replace('Transfer to savings — ','').replace('Transfer to savings','').trim();
-      if(goalNameDep){S.savingsGoals=S.savingsGoals.map(g=>g.name===goalNameDep?{...g,allocated:Math.max(0,Math.round((g.allocated-Math.abs(t.amt))*100)/100)}:g);}
+      // Was: Chime -= v, chimeSavingsBal += v — reverse both
+      S.chimeSavingsBal=Math.max(0,Math.round((S.chimeSavingsBal-Math.abs(t.amt))*100)/100);
+      var goalNameDep=t.desc.replace('Transfer to savings \u2014 ','').replace('Transfer to savings','').trim();
+      if(goalNameDep)S.savingsGoals=S.savingsGoals.map(g=>g.name===goalNameDep?{...g,allocated:Math.max(0,Math.round((g.allocated-Math.abs(t.amt))*100)/100)}:g);
     }
-    // Note: savings_transfer transactions come in pairs — deleting one doesn't auto-delete the other
+    if(t.txType==='savings_withdrawal'){
+      // Was: Chime += v, chimeSavingsBal -= v — reverse both
+      S.chimeSavingsBal=Math.round((S.chimeSavingsBal+Math.abs(t.amt))*100)/100;
+      var goalNameWd=t.desc.replace('Transfer from savings \u2014 ','').replace('Transfer from savings','').trim();
+      if(goalNameWd)S.savingsGoals=S.savingsGoals.map(g=>g.name===goalNameWd?{...g,allocated:Math.round((g.allocated+Math.abs(t.amt))*100)/100}:g);
+    }
     S.txns=S.txns.filter(x=>x.id!==el.dataset.dt);
     save();render();
   });
