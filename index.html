@@ -59,16 +59,14 @@ var S={
   view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,
   txForm:false,txType:'expense',txAcct:'chime',
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
-  filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
+  filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
   shareToken:null,showSharePanel:false,
-  tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,
+  balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,
   billAssignTxId:null,loanAssignTxId:null,editTx:null,
   goalForm:false,editGoal:null,
   merchantMemory:{},
-  dismissedDupes:[],
   bulkCat:false,
-  bulkDupes:false,
-  reconcileView:false,reconcileData:null,reconcileParsing:false,reconcileFiles:[]
+  importView:false,importData:null,importParsing:false,importFiles:[]
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -102,8 +100,9 @@ function prevCycleStart(){
   return prev.length?prev[0].date:null;
 }
 function isBillPaid(billId){
-  if(!S.lastPaycheckDate)return false;
-  return S.txns.some(t=>t.isBillPayment&&t.billId===billId&&t.date>=S.lastPaycheckDate);
+  // Check for a bill payment transaction since the most recent paycheck OR in the last 60 days
+  var since=S.lastPaycheckDate||new Date(Date.now()-60*86400000).toISOString().slice(0,10);
+  return S.txns.some(t=>t.isBillPayment&&t.billId===billId&&t.date>=since);
 }
 function savingsRate(){
   if(!S.lastPaycheckDate)return null;
@@ -142,23 +141,17 @@ function getPayday(){
 }
 function deduplicateTxns(){
   var before=S.txns.length;
-  var seen=new Map();
+  var seen=new Set();
   S.txns=S.txns.filter(t=>{
     var key=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
-    if(!seen.has(key)){seen.set(key,t);return true;}
-    var prev=seen.get(key);
-    // Prefer the entry with a tellerId
-    if(t.tellerId&&!prev.tellerId){seen.set(key,t);return true;}
-    return false;
+    if(seen.has(key))return false;
+    seen.add(key);return true;
   });
-  var kept=new Set(seen.values());
-  S.txns=S.txns.filter(t=>kept.has(t));
   return S.txns.length<before;
 }
 
 function startListener(){
   if(unsub)unsub();
-  var firstLoad=true;
   unsub=onSnapshot(doc(db,'users',U.uid,'data','main'),snap=>{
     if(snap.exists()){
       var d=snap.data();
@@ -168,61 +161,20 @@ function startListener(){
       S.savingsGoals=(d.savingsGoals||(d.savingsGoal&&d.savingsGoal.name?[{id:uid(),name:d.savingsGoal.name,target:d.savingsGoal.amount||0,allocated:d.savingsTotal||0,budgetPct:d.savingsPct||0}]:[])).map(g=>({...g,allocated:g.allocated!==undefined?g.allocated:(g.saved||0)}));
       S.envelopes=d.envelopes||{};
       S.lastPaycheckDate=d.lastPaycheckDate||'';
-      S.tellerToken=d.tellerToken||null;
-      S.tellerAccountId=d.tellerAccountId||null;
-      S.tellerSavingsAccountId=d.tellerSavingsAccountId||null;
-      S.tellerLastSync=d.tellerLastSync||null;
       S.shareToken=d.shareToken||null;
       S.merchantMemory=d.merchantMemory||{};
-      S.dismissedDupes=d.dismissedDupes||[];
+      S.balConfirmedDate=d.balConfirmedDate||null;
+      S.savingsConfirmedDate=d.savingsConfirmedDate||null;
+      S.hsaConfirmedDate=d.hsaConfirmedDate||null;
     }
     render();
-    // One-time migration: clean existing duplicates (pending→settled with different tellerIds)
-    // Only collapses where both transactions have a tellerId (both from Teller, not manual entries)
-    if(firstLoad){
-      var seen=new Map();
-      var before=S.txns.length;
-      S.txns=S.txns.filter(t=>{
-        var key=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
-        if(!seen.has(key)){seen.set(key,t);return true;}
-        var existing=seen.get(key);
-        // Only deduplicate if both have tellerIds — never remove manual entries
-        if(t.tellerId&&existing.tellerId)return false;
-        return true;
-      });
-      if(S.txns.length<before)save();
-    }
-    // One-time migration: fix income transactions on first load
-    if(firstLoad){
-      var changed=false;
-      S.txns=S.txns.map(t=>{
-        if(t.txType==='income'&&t.amt<0){changed=true;return{...t,amt:Math.abs(t.amt)};}
-        return t;
-      });
-      var pcWords=S.paychecks.filter(p=>p.account==='chime').map(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
-      S.txns=S.txns.map(t=>{
-        if(t.amt>=0||(t.account&&t.account!=='chime')||t.txType)return t;
-        var descLow=(t.desc||'').toLowerCase();
-        var isPaycheck=pcWords.some(words=>words.some(w=>descLow.includes(w)));
-        if(isPaycheck){changed=true;return{...t,amt:Math.abs(t.amt),txType:'income'};}
-        return t;
-      });
-    deduplicateTxns();
-      if(changed)save();
-    }
-    if(firstLoad&&S.tellerToken&&S.tellerAccountId){
-      firstLoad=false;
-      tellerSync();
-    }else{
-      firstLoad=false;
-    }
   },e=>console.error(e));
 }
 function save(){
   if(!U)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerSavingsAccountId:S.tellerSavingsAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken,merchantMemory:S.merchantMemory,dismissedDupes:S.dismissedDupes})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,merchantMemory:S.merchantMemory,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -242,196 +194,6 @@ async function revokeShare(){
 function shareUrl(){return window.location.origin+window.location.pathname+'?share='+S.shareToken}
 
 
-const FUNCTIONS_BASE='https://us-central1-paydayguard.cloudfunctions.net';
-
-async function tellerSync(){
-  if(!S.tellerToken||!S.tellerAccountId)return;
-  S.tellerSyncing=true;render();
-  try{
-    // Log all available accounts so we can see what Teller returns
-    try{
-      var acctRes=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken})});
-      var acctRaw=await acctRes.text();
-      console.log('TELLER ACCOUNTS RAW (status '+acctRes.status+'):', acctRaw);
-    }catch(ae){console.log('TELLER ACCOUNTS ERROR:',ae.message);}
-    // Sync checking balance
-    var balRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId})});
-    var balData=await balRes.json();
-    if(balData.balance){S.bal=Math.round((parseFloat(balData.balance.available||balData.balance.ledger||0))*100)/100;}
-
-    // Sync savings balance if connected
-    if(S.tellerSavingsAccountId){
-      var savBalRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerSavingsAccountId})});
-      var savBalData=await savBalRes.json();
-      if(savBalData.balance){
-        S.chimeSavingsBal=Math.round((parseFloat(savBalData.balance.available||savBalData.balance.ledger||0))*100)/100;
-      }
-    }
-
-    // Fetch checking transactions (500 most recent)
-    var txRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId,count:500})});
-    var txData=await txRes.json();
-    if(txData.transactions&&txData.transactions.length){
-      var existing=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
-      // Fix existing Teller transactions that were misclassified before income detection was added
-      S.txns=S.txns.map(t=>{
-        if(!t.tellerId)return t;
-        var raw=txData.transactions.find(r=>r.id===t.tellerId);
-        if(!raw)return t;
-        var isCredit=parseFloat(raw.amount||0)>0;
-        if(isCredit&&t.amt<0){
-          return{...t,amt:Math.abs(t.amt),txType:'income',cat:undefined};
-        }
-        if(isSavingsTransfer(t.desc)&&t.txType!=='savings_transfer'){
-          return{...t,txType:'savings_transfer'};
-        }
-        return t;
-      });
-      // Only import transactions we haven't seen before (by Teller ID)
-      // Also catch pending→posted duplicates from same batch and existing storage
-      var seenBatch=new Map();
-      var newTxns=txData.transactions.filter(t=>t.status==='posted'&&t.date>='2026-01-01').filter(t=>{
-        if(existing.has(t.id))return false;
-        var amt=parseFloat(t.amount||0);
-        var desc=(t.description||'').trim();
-        var batchKey=t.date+'|'+amt+'|'+desc;
-        if(seenBatch.has(batchKey))return false;
-        seenBatch.set(batchKey,t.id);
-        var dupe=S.txns.find(x=>x.date===t.date&&x.amt===amt&&(x.desc||'').trim()===desc);
-        if(dupe){if(!dupe.tellerId){S.txns=S.txns.map(x=>x===dupe?{...x,tellerId:t.id}:x);}return false;}
-        return true;
-      }).map(t=>{
-        var rawAmt=parseFloat(t.amount||0);
-        var isCredit=rawAmt>0;
-        var amt=rawAmt;
-        var desc=t.description||t.details?.counterparty?.name||'Chime transaction';
-        var tx={id:uid(),tellerId:t.id,desc,amt,date:t.date,account:'chime'};
-        if(isCredit){tx.txType='income';}
-        else if(isSavingsTransfer(desc)){tx.txType='savings_transfer';}
-        else{
-          // Check merchant memory first, then keyword hints
-          var key=merchantKey(desc);
-          var remembered=key?S.merchantMemory[key]:null;
-          if(remembered&&remembered.startsWith('__bill:')){
-            var billId=remembered.replace('__bill:','');
-            var bill=S.bills.find(b=>b.id===billId);
-            if(bill){tx.suggestedBillId=billId;}
-            else{var suggested=suggestCategory(desc);if(suggested)tx.suggestedCat=suggested;}
-          }else if(remembered&&remembered.startsWith('__loan:')){
-            var loanId=remembered.replace('__loan:','');
-            if(S.loans.find(l=>l.id===loanId))tx.suggestedLoanId=loanId;
-            else{var suggested=suggestCategory(desc);if(suggested)tx.suggestedCat=suggested;}
-          }else if(remembered&&gc().find(c=>c.id===remembered)){
-            tx.suggestedCat=remembered;
-          }else{
-            var suggested=suggestCategory(desc);
-            if(suggested)tx.suggestedCat=suggested;
-          }
-        }
-        return tx;
-      });
-      if(newTxns.length)S.txns=newTxns.concat(S.txns);
-
-      // Auto-apply paycheck matches
-      newTxns.filter(t=>t.txType==='income').forEach(t=>{
-        var matched=S.paychecks.find(p=>{
-          if(p.account!=='chime')return false;
-          // Description match: any word from paycheck name appears in transaction desc
-          var pWords=p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2);
-          var descLow=t.desc.toLowerCase();
-          var descMatch=pWords.some(w=>descLow.includes(w));
-          // Amount match: within $50
-          var amtMatch=Math.abs(t.amt-p.amt)<=50;
-          return descMatch&&amtMatch;
-        });
-        if(matched&&t.date>=matched.nextDate){
-          // Fund envelopes from safe-to-spend at time of paycheck
-          var sts=S.bal-upcoming().reduce((s,b)=>s+b.amt,0);
-          // Fund spending envelopes
-          var cats=gc(),newEnv={};
-          cats.forEach(c=>{newEnv[c.id]=Math.round(sts*(c.budgetPct||0)*100)/100});
-          // Fund each savings goal
-          S.savingsGoals=S.savingsGoals.map(g=>{
-            var contrib=Math.round(sts*(g.budgetPct||0)*100)/100;
-            newEnv['__sg_'+g.id]=contrib;
-            return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
-          });
-          S.envelopes=newEnv;
-          S.lastPaycheckDate=t.date;
-          // Advance paycheck nextDate
-          S.paychecks=S.paychecks.map(p=>p.id===matched.id?{...p,nextDate:advPc(p)}:p);
-          console.log('Auto-applied paycheck:',matched.name,'on',t.date);
-        }
-      });
-    }
-
-    // Fetch savings transactions (90 days)
-    if(S.tellerSavingsAccountId){
-      var savTxRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerSavingsAccountId,count:500})});
-      var savTxData=await savTxRes.json();
-      if(savTxData.transactions&&savTxData.transactions.length){
-        var existingSav=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
-        var seenSavBatch=new Map();
-        var newSavTxns=savTxData.transactions.filter(t=>t.status==='posted'&&t.date>='2026-01-01').filter(t=>{
-          if(existingSav.has(t.id))return false;
-          var amt=parseFloat(t.amount||0);
-          var desc=(t.description||'').trim();
-          var batchKey=t.date+'|'+amt+'|'+desc;
-          if(seenSavBatch.has(batchKey))return false;
-          seenSavBatch.set(batchKey,t.id);
-          var dupe=S.txns.find(x=>x.account==='chimeSavings'&&x.date===t.date&&x.amt===amt&&(x.desc||'').trim()===desc);
-          if(dupe){if(!dupe.tellerId){S.txns=S.txns.map(x=>x===dupe?{...x,tellerId:t.id}:x);}return false;}
-          return true;
-        }).map(t=>{
-          var amt=parseFloat(t.amount||0); // signed: positive = deposit into savings, negative = withdrawal
-          var desc=t.description||'Savings transfer';
-          return{id:uid(),tellerId:t.id,desc,amt,date:t.date,account:'chimeSavings',txType:'savings_transfer'};
-        });
-        if(newSavTxns.length)S.txns=newSavTxns.concat(S.txns);
-      }
-    }
-
-    deduplicateTxns();
-    S.tellerLastSync=new Date().toISOString();
-    save();
-  }catch(e){console.error('Teller sync error',e)}
-  S.tellerSyncing=false;render();
-}
-
-function openTellerConnect(){
-  var script=document.createElement('script');
-  script.src='https://cdn.teller.io/connect/connect.js';
-  script.onload=function(){
-    var tc=window.TellerConnect.setup({
-      applicationId:'app_prp572s7pk1512s5r6000',
-      onSuccess:async function(enrollment){
-        S.tellerToken=enrollment.accessToken;
-        try{
-          var res=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:enrollment.accessToken})});
-          var data=await res.json();
-          if(data.accounts&&data.accounts.length){
-            console.log('TELLER ACCOUNTS:', JSON.stringify(data.accounts,null,2));
-            var checking=data.accounts.find(a=>a.subtype==='checking')||data.accounts.find(a=>a.type==='depository')||data.accounts[0];
-            var savings=data.accounts.find(a=>a.subtype==='savings');
-            if(checking)S.tellerAccountId=checking.id;
-            if(savings)S.tellerSavingsAccountId=savings.id;
-          }
-        }catch(e){
-          console.error('getAccounts failed:',e);
-          if(enrollment.enrollment&&enrollment.enrollment.accounts){
-            S.tellerAccountId=enrollment.enrollment.accounts[0]?.id||null;
-          }
-        }
-        save();
-        await tellerSync();
-      },
-      onExit:function(){render()}
-    });
-    tc.open();
-  };
-  document.head.appendChild(script);
-}
-
 
 function upcoming(){
   var pd=getPayday();
@@ -444,32 +206,26 @@ function days(){var pd=getPayday();if(!pd)return null;var now=new Date();now.set
 function showLevel(v){if(!getPayday())return'safe';return v<20?'danger':v<100?'warning':'safe'}
 function ls(l){return{danger:{c:'var(--tx-err)',bg:'var(--bg-err)',br:'var(--bd-err)'},warning:{c:'var(--tx-warn)',bg:'var(--bg-warn)',br:'var(--bd-warn)'},safe:{c:'var(--tx-ok)',bg:'var(--bg-ok)',br:'var(--bd-ok)'}}[l]}
 function pcsToday(){
-  if(S.tellerToken&&S.tellerAccountId)return[]; // Teller handles paycheck detection automatically
   var t=tod();return S.paychecks.filter(p=>p.nextDate===t&&!S.disPcs.includes(p.id));
+}
+function billsDue(){
+  var t=tod();
+  return S.bills.filter(b=>b.nextDue<=t&&!isBillPaid(b.id)&&!S.disBills.includes(b.id));
 }
 
 function ttag(cat){if(!cat)return'';var c=gcat(cat),cl=co(c.color);return`<span class="tag" style="background:${cl.bg};color:${cl.c}">${c.label}</span>`}
 function swatch(k,sel){var cl=co(k);return`<button type="button" data-swatch="${k}" style="width:32px;height:32px;border-radius:50%;background:${cl.bg};border:${sel?'3px solid '+cl.c:'1px solid var(--bd)'};cursor:pointer;flex-shrink:0"></button>`}
 function bcard(title,bid,val){
-  var isChime=bid==='chime';
-  var tellerConnected=isChime&&S.tellerToken&&S.tellerAccountId;
-  var syncBtn=tellerConnected
-    ?`<div style="display:flex;gap:6px;flex:1">
-        <button class="btn" id="chime-sync" style="font-size:12px;padding:5px 10px;flex:1;${S.tellerSyncing?'opacity:.5':''}">${S.tellerSyncing?'Syncing...':'↻ Sync'}</button>
-        <button class="btn" id="chime-relink-token" style="font-size:11px;padding:5px 8px;color:var(--tx-info);border-color:var(--bd)">Re-link</button>
-        ${!S.tellerSavingsAccountId?`<button class="btn" id="chime-relink" style="font-size:11px;padding:5px 8px;color:var(--tx-info);border-color:var(--bd)">Link Savings</button>`:''}
-      </div>`
-    :(isChime?`<button class="btn" id="chime-connect" style="font-size:12px;padding:5px 10px;flex:1;color:var(--tx-info);border-color:var(--bd)">Link Chime</button>`:'');
-  var lastSync=tellerConnected&&S.tellerLastSync?`<p style="font-size:10px;color:var(--tx2);margin-top:4px">Synced ${fd(S.tellerLastSync.split('T')[0])}</p>`:'';
+  var confirmedDate=bid==='chime'?S.balConfirmedDate:bid==='hsa'?S.hsaConfirmedDate:null;
+  var lastConfirmed=confirmedDate?`<p style="font-size:10px;color:var(--tx2);margin-top:4px">Confirmed ${fd(confirmedDate)}</p>`:'<p style="font-size:10px;color:var(--tx-warn);margin-top:4px">Not yet confirmed</p>';
   return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px">
     <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:4px">${title}</p>
     <p class="mono" style="font-size:22px;font-weight:500;margin-bottom:8px">${fm(val)}</p>
     <div style="display:flex;gap:6px">
       <button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
       <button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
-      ${syncBtn}
     </div>
-    ${lastSync}
+    ${lastConfirmed}
     <div id="${bid}-f" style="display:none;margin-top:8px">
       <input class="field mono" id="${bid}-i" type="number" step="0.01" placeholder="Balance" style="margin-bottom:6px">
       <button class="btn" id="${bid}-sb" style="width:100%;font-size:12px;padding:6px">Save</button>
@@ -565,49 +321,6 @@ var MERCHANT_HINTS=[
   {words:['cvs','walgreen','rite aid','pharmacy','doctor','medical','dental','vision','clinic','hospital','urgent care','health','prescription'],label:'health'},
 ];
 
-function allSuspectedDupes(){
-  var pairs=[];var seen=new Set();
-  var expenses=S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings');
-  for(var i=0;i<expenses.length;i++){
-    var a=expenses[i];
-    var aWords=(a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
-    if(!aWords||aWords.length<3)continue;
-    for(var j=i+1;j<expenses.length;j++){
-      var b=expenses[j];
-      var bWords=(b.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
-      if(aWords!==bWords)continue;
-      if(Math.abs(a.amt-b.amt)<0.01)continue;
-      var dayDiff=Math.abs((new Date(a.date+'T00:00:00')-new Date(b.date+'T00:00:00'))/86400000);
-      if(dayDiff>3)continue;
-      var pairKey=[a.id,b.id].sort().join('|');
-      if(S.dismissedDupes.includes(pairKey))continue;
-      if(!seen.has(pairKey)){seen.add(pairKey);pairs.push({a,b,pairKey});}
-    }
-  }
-  return pairs;
-}
-
-function firstSuspectedDupe(){
-  // Find two expense transactions: same merchant (first 2 words), within 3 days, different amounts
-  var expenses=S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings');
-  for(var i=0;i<expenses.length;i++){
-    var a=expenses[i];
-    var aWords=(a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
-    if(!aWords||aWords.length<3)continue;
-    for(var j=i+1;j<expenses.length;j++){
-      var b=expenses[j];
-      var bWords=(b.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
-      if(aWords!==bWords)continue;
-      if(Math.abs(a.amt-b.amt)<0.01)continue; // exact match handled by dedup
-      var dayDiff=Math.abs((new Date(a.date+'T00:00:00')-new Date(b.date+'T00:00:00'))/86400000);
-      if(dayDiff>3)continue;
-      var pairKey=[a.id,b.id].sort().join('|');
-      if(S.dismissedDupes.includes(pairKey))continue;
-      return{a,b,pairKey};
-    }
-  }
-  return null;
-}
 
 function merchantKey(desc){
   if(!desc)return'';
@@ -654,6 +367,15 @@ function isSavingsTransfer(desc){
   return SAVINGS_TRANSFER_KEYWORDS.some(k=>d.includes(k));
 }
 
+function needsBalanceConfirm(){
+  var today=tod();
+  var accounts=[];
+  if(S.balConfirmedDate!==today)accounts.push({key:'chime',label:'Chime',bid:'chime',val:S.bal});
+  if(S.savingsConfirmedDate!==today&&(S.savingsGoals.length>0||S.chimeSavingsBal>0))accounts.push({key:'savings',label:'Chime Savings',bid:'savings',val:S.chimeSavingsBal});
+  if(S.hsaConfirmedDate!==today&&S.hsa>0)accounts.push({key:'hsa',label:'HSA',bid:'hsa',val:S.hsa});
+  return accounts;
+}
+
 function firstUncategorized(){
   return S.txns.find(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings')||null;
 }
@@ -662,30 +384,48 @@ function banners(){
   pcsToday().forEach(p=>{
     h+=`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}</div><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button><button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
   });
-  // Suspected duplicate banner — show first so user doesn't categorize dupes
-  var dupe=firstSuspectedDupe();
-  if(dupe){
-    h+=`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-      <p style="font-size:13px;font-weight:600;color:var(--tx-warn)">⚠ Possible duplicate charge</p>
-      ${(()=>{var total=allSuspectedDupes().length;return total>1?`<span style="font-size:11px;color:var(--tx-warn);background:var(--bg-warn);padding:3px 8px;border-radius:6px">${total} pairs</span>`:'';})()} 
-    </div>
-    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Same merchant, ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart — is one a duplicate?</p>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-        <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
-        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.a.amt)}</p><button class="btn" data-del-dupe="${dupe.a.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+  // Bill confirmation banners — show overdue/due bills one at a time
+  billsDue().slice(0,1).forEach(b=>{
+    var overdue=b.nextDue<tod();
+    h+=`<div style="background:var(--bg);border:1px solid ${overdue?'var(--bd-err)':'var(--bd-warn)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div>
+        <p style="font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'}">${overdue?'⚠ Overdue':'📅 Due today'} — ${b.name}</p>
+        <p style="font-size:11px;color:var(--tx2);margin-top:2px">${overdue?'Was due '+fd(b.nextDue):'Due today'} · typical ${fm(b.amt)}</p>
       </div>
-      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-        <div><p style="font-size:13px;font-weight:500">${dupe.b.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.b.date)}</p></div>
-        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.b.amt)}</p><button class="btn" data-del-dupe="${dupe.b.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
-      </div>
+      <span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${billsDue().length} bill${billsDue().length!==1?'s':''}</span>
     </div>
-    <button class="btn" data-dismiss-dupe="${dupe.pairKey}" style="width:100%;font-size:12px;padding:6px;color:var(--tx2)">Both are real — keep both</button>
-  </div>`;
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <input class="field mono" id="bill-conf-amt-${b.id}" type="number" step="0.01" placeholder="${b.amt.toFixed(2)}" style="flex:1">
+      <button class="btn" data-bill-confirm="${b.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">✓ Paid</button>
+      <button class="btn" data-bill-skip="${b.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Not yet</button>
+    </div>
+    </div>`;
+  });
+  // Daily balance confirmation banner
+  var unconfirmed=needsBalanceConfirm();
+  if(unconfirmed.length){
+    h+=`<div style="background:var(--bg);border:1px solid var(--bd-info);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <p style="font-size:13px;font-weight:600;color:var(--tx-info)">📋 Confirm today's balances</p>
+      <button class="btn" id="bal-confirm-skip" style="font-size:11px;padding:4px 10px;color:var(--tx2);min-height:0">Skip all</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+    ${unconfirmed.map(a=>`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <p style="font-size:13px;font-weight:500">${a.label}</p>
+        <p class="mono" style="font-size:13px;color:var(--tx2)">${fm(a.val)}</p>
+      </div>
+      <div style="display:flex;gap:6px">
+        <input class="field mono" id="bal-conf-inp-${a.key}" type="number" step="0.01" placeholder="Enter actual balance or leave blank to confirm" style="flex:1;font-size:12px;padding:6px 10px">
+        <button class="btn" data-bal-confirm="${a.key}" style="font-size:12px;padding:6px 12px;color:var(--tx-ok);border-color:var(--bd-ok);white-space:nowrap">✓</button>
+      </div>
+    </div>`).join('')}
+    </div></div>`;
   }
-  // Uncategorized transaction banner — only show when no dupes pending
-  var unc=!dupe?firstUncategorized():null;  if(unc){
+  // Uncategorized transaction banner
+  var unc=firstUncategorized();
+  if(unc){
     var cats=gc();
     var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings').length;
     var suggested=unc.suggestedCat||null;
@@ -714,15 +454,13 @@ function banners(){
 
 
 function savingsCard(){
-  var hasTellerSavings=!!(S.tellerToken&&S.tellerSavingsAccountId);
-  var savBal=hasTellerSavings?S.chimeSavingsBal:S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
-  var showCard=hasTellerSavings||S.savingsGoals.length>0;
+  var savBal=S.chimeSavingsBal||S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
+  var showCard=S.savingsGoals.length>0||S.chimeSavingsBal>0;
   if(!showCard)return'';
   var totalAllocated=S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
   var unallocated=Math.max(0,Math.round((savBal-totalAllocated)*100)/100);
   var lastAmt=S.savingsGoals.reduce((s,g)=>{var contrib=S.envelopes['__sg_'+g.id]||0;return s+contrib},0);
-  var syncStatus=hasTellerSavings&&S.tellerLastSync?`<p style="font-size:10px;color:var(--tx2);margin-top:2px">Synced ${fd(S.tellerLastSync.split('T')[0])}</p>`:'';
-
+  var confirmedLabel=S.savingsConfirmedDate?`<p style="font-size:10px;color:var(--tx2);margin-top:2px">Confirmed ${fd(S.savingsConfirmedDate)}</p>`:'<p style="font-size:10px;color:var(--tx-warn);margin-top:2px">Not yet confirmed</p>';
   var depositForm=S.showDeposit?`<div style="margin-top:12px;border-top:1px solid var(--bd-ok);padding-top:12px">
     <label>Transfer amount (Chime → Savings)</label>
     <div style="display:flex;gap:8px;margin-top:6px;margin-bottom:8px">
@@ -760,7 +498,7 @@ function savingsCard(){
     <div>
       <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx-ok);margin-bottom:4px">Chime Savings</p>
       <p class="mono" style="font-size:22px;font-weight:500;color:var(--tx-ok)">${fm(savBal)}</p>
-      ${syncStatus}
+      ${confirmedLabel}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       ${lastAmt>0?`<p style="font-size:11px;color:var(--tx2)">+${fm(lastAmt)} last paycheck</p>`:''}
@@ -1082,34 +820,142 @@ function loanForm(){
   var f=S.editLoan?S.loans.find(l=>l.id===S.editLoan)||{}:{};
   return`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px"><p style="font-size:14px;font-weight:500;margin-bottom:12px">${S.editLoan?'Edit loan':'New loan'}</p><input class="field" id="lfName" type="text" placeholder="Loan name" value="${f.name||''}" style="margin-bottom:8px">${S.editLoan?`<div style="display:flex;gap:8px;margin-bottom:12px"><div style="flex:1"><label>Original amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" value="${f.orig||''}"></div><div style="flex:1"><label>Current balance</label><input class="field mono" id="lfBal" type="number" step="0.01" min="0" value="${f.bal||''}"></div></div>`:`<div style="margin-bottom:12px"><label>Total loan amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" placeholder="e.g. 15000.00" style="margin-top:4px"></div>`}<div style="display:flex;gap:8px"><button class="btn" id="lfSave" style="flex:1;font-weight:500">Save loan</button><button class="btn" id="lfCancel" style="flex:1">Cancel</button></div></div>`;
 }
-function reconcileStatementTxns(stmtTxns){
-  // Build multiset of statement transactions keyed by date+cents
-  var pool=new Map();
-  stmtTxns.forEach(t=>{
-    // Try both the transaction date and ±1 day (settlement date differences)
-    var k=t.date+'|'+Math.round(t.amount*100);
-    if(!pool.has(k))pool.set(k,[]);
-    pool.get(k).push(t);
-  });
-  // Detect period from statement dates
-  var dates=stmtTxns.map(t=>t.date).sort();
-  var periodStart=dates[0],periodEnd=dates[dates.length-1];
-  // All Teller-imported Chime transactions in the period
-  var tellerTxns=S.txns.filter(t=>t.account==='chime'&&t.tellerId&&t.date>=periodStart&&t.date<=periodEnd&&t.txType!=='income'&&t.txType!=='savings_transfer'&&!t.isLoanPayment&&t.amt<0);
-  var matched=[],dupes=[];
-  tellerTxns.forEach(t=>{
-    var cents=Math.round(t.amt*100);
-    // Try exact date first, then ±1 day for settlement differences
-    var found=false;
-    for(var delta of [0,-1,1,2,-2]){
-      var d=new Date(t.date+'T00:00:00');d.setDate(d.getDate()+delta);
-      var dk=d.toISOString().slice(0,10)+'|'+cents;
-      var bucket=pool.get(dk);
-      if(bucket&&bucket.length>0){bucket.shift();matched.push(t);found=true;break;}
+function importStatementTxns(stmtTxns){
+  // Build dedup set from existing transactions (exact match + ±2 day tolerance)
+  var existing=S.txns.map(t=>({key:(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime'),t}));
+  var imported=[],skipped=0;
+  stmtTxns.forEach(stmt=>{
+    var desc=(stmt.description||'').trim();
+    var amt=stmt.amount;
+    var date=stmt.date;
+    var acct='chime';
+    // Exact match
+    var isDupe=existing.some(e=>e.key===desc+'|'+date+'|'+amt+'|'+acct);
+    // ±2 day tolerance for settlement date differences
+    if(!isDupe){
+      for(var delta of [-1,1,-2,2]){
+        var d=new Date(date+'T00:00:00');d.setDate(d.getDate()+delta);
+        var altDate=d.toISOString().slice(0,10);
+        if(existing.some(e=>e.key===desc+'|'+altDate+'|'+amt+'|'+acct)){isDupe=true;break;}
+      }
     }
-    if(!found)dupes.push(t);
+    if(isDupe){skipped++;return;}
+    // Classify the transaction
+    var tx={id:uid(),desc,amt,date,account:acct};
+    if(amt>0){
+      tx.txType='income';
+    }else if(isSavingsTransfer(desc)){
+      tx.txType='savings_transfer';
+    }else{
+      var mkey=merchantKey(desc);
+      var remembered=mkey?S.merchantMemory[mkey]:null;
+      if(remembered&&remembered.startsWith('__bill:')){
+        var billId=remembered.replace('__bill:','');
+        if(S.bills.find(b=>b.id===billId))tx.suggestedBillId=billId;
+        else{var sc=suggestCategory(desc);if(sc)tx.suggestedCat=sc;}
+      }else if(remembered&&remembered.startsWith('__loan:')){
+        var loanId=remembered.replace('__loan:','');
+        if(S.loans.find(l=>l.id===loanId))tx.suggestedLoanId=loanId;
+      }else if(remembered&&gc().find(c=>c.id===remembered)){
+        tx.cat=remembered;
+      }else{
+        var sc2=suggestCategory(desc);if(sc2)tx.suggestedCat=sc2;
+      }
+    }
+    imported.push(tx);
+    existing.push({key:desc+'|'+date+'|'+amt+'|'+acct,t:tx});
   });
-  return{dupes,matched,periodStart,periodEnd,total:tellerTxns.length};
+  return{imported,skipped};
+}
+
+async function importStatementPDF(files){
+  S.importParsing=true;S.importData=null;S.importFiles=files.map(f=>({name:f.name,status:'pending'}));render();
+  try{
+    var allStmtTxns=[];
+    for(var i=0;i<files.length;i++){
+      S.importFiles[i].status='parsing';render();
+      var base64=await new Promise((res,rej)=>{var r=new FileReader();r.onload=e=>res(e.target.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(files[i]);});
+      var text=await parsePDFToText(base64);
+      var txns=parseChimeStatementText(text);
+      S.importFiles[i].status=txns.length?'done':'error';
+      S.importFiles[i].count=txns.length;
+      allStmtTxns=allStmtTxns.concat(txns);
+      render();
+    }
+    if(!allStmtTxns.length)throw new Error('No transactions found — is this a Chime Combined Activity Statement?');
+    S.importData=importStatementTxns(allStmtTxns);
+  }catch(e){
+    console.error('Import error',e);
+    S.importData={error:e.message||'Parse failed'};
+  }
+  S.importParsing=false;render();
+}
+
+function importViewHtml(){
+  if(S.importParsing){
+    var files=S.importFiles||[];
+    return`<div style="padding:16px"><h2 style="font-size:18px;font-weight:600;margin-bottom:16px">Import Statement</h2>
+    <div style="display:flex;flex-direction:column;gap:8px">
+    ${files.map(f=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+      <p style="font-size:13px">${f.name}</p>
+      <p style="font-size:12px;color:${f.status==='done'?'var(--tx-ok)':f.status==='error'?'var(--tx-err)':'var(--tx2)'}">${f.status==='done'?'✓ '+f.count+' txns':f.status==='error'?'✗ no transactions':f.status==='parsing'?'Parsing…':'Waiting…'}</p>
+    </div>`).join('')}
+    </div></div>`;
+  }
+  if(S.importData&&S.importData.error){
+    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-size:18px;font-weight:600">Import Statement</h2><button class="btn" id="import-back-btn" style="font-size:13px;padding:6px 14px">Back</button></div><div style="background:var(--bg-err);border:1px solid var(--bd-err);border-radius:12px;padding:16px"><p style="color:var(--tx-err)">Error: ${S.importData.error}</p></div></div>`;
+  }
+  if(S.importData){
+    var d=S.importData;
+    var files=S.importFiles||[];
+    var newExpenses=d.imported.filter(t=>t.amt<0&&t.txType!=='savings_transfer');
+    var newIncome=d.imported.filter(t=>t.amt>0||t.txType==='income');
+    var newSavings=d.imported.filter(t=>t.txType==='savings_transfer');
+    return`<div style="padding:16px 16px 0">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div><h2 style="font-size:18px;font-weight:600">Import Preview</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${files.length} statement${files.length!==1?'s':''}</p></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn" id="import-upload-more-btn" style="font-size:13px;padding:6px 12px">+ Add more</button>
+        <button class="btn" id="import-back-btn" style="font-size:13px;padding:6px 14px">Cancel</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+      <div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:10px;padding:12px;text-align:center"><p class="mono" style="font-size:22px;font-weight:600;color:var(--tx-ok)">${d.imported.length}</p><p style="font-size:11px;color:var(--tx-ok)">new transactions</p></div>
+      <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:12px;text-align:center"><p class="mono" style="font-size:22px;font-weight:600;color:var(--tx2)">${d.skipped}</p><p style="font-size:11px;color:var(--tx2)">already existed</p></div>
+    </div>
+    ${d.imported.length===0?'<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:24px;text-align:center;margin-bottom:16px"><p style="font-size:24px;margin-bottom:8px">✓</p><p style="font-size:14px;color:var(--tx-ok)">All transactions already imported — nothing new.</p></div>':`
+    ${newExpenses.length?`<p style="font-size:12px;color:var(--tx2);font-weight:500;margin-bottom:6px">EXPENSES (${newExpenses.length})</p>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+    ${newExpenses.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
+      <div><p style="font-size:13px">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}${t.cat?' · <span style="color:var(--tx-ok)">'+gc().find(c=>c.id===t.cat)?.label+'</span>':t.suggestedCat?' · suggestion: '+gc().find(c=>c.id===t.suggestedCat)?.label:''}</p></div>
+      <p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(t.amt)}</p>
+    </div>`).join('')}
+    </div>`:''}
+    ${newIncome.length?`<p style="font-size:12px;color:var(--tx2);font-weight:500;margin-bottom:6px">INCOME (${newIncome.length})</p>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+    ${newIncome.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div style="background:var(--bg);border:1px solid var(--bd-ok);border-radius:8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
+      <div><p style="font-size:13px">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}</p></div>
+      <p class="mono" style="font-size:13px;color:var(--tx-ok)">+${fm(t.amt)}</p>
+    </div>`).join('')}
+    </div>`:''}
+    <button class="btn" id="import-confirm-btn" style="width:100%;font-weight:500;color:var(--tx-ok);border-color:var(--bd-ok);margin-bottom:16px">Import ${d.imported.length} transaction${d.imported.length!==1?'s':''}</button>
+    `}
+    <input type="file" id="import-pdf-input" accept=".pdf" multiple style="display:none">
+    </div>`;
+  }
+  // Upload state
+  return`<div style="padding:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:18px;font-weight:600">Import Statement</h2>
+    <button class="btn" id="import-back-btn" style="font-size:13px;padding:6px 14px">Back</button>
+  </div>
+  <div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:20px">
+    <p style="font-size:14px;font-weight:500;margin-bottom:6px">Upload Chime Combined Statement</p>
+    <p style="font-size:12px;color:var(--tx2);margin-bottom:16px">Upload your monthly Combined Account Activity Statement. New transactions are previewed before importing — existing ones are skipped automatically.</p>
+    <input type="file" id="import-pdf-input" accept=".pdf" multiple style="display:none">
+    <button class="btn" id="import-upload-btn" style="width:100%;font-weight:500;color:var(--tx-info);border-color:var(--bd)">📄 Choose PDF statement</button>
+  </div>
+  </div>`;
 }
 
 function parseChimeStatementText(text){
@@ -1125,11 +971,11 @@ function parseChimeStatementText(text){
 
   if(isCombined){
     // Combined format: DATE DESCRIPTION TYPE AMOUNT ACCOUNT SETTLEMENT_DATE
-    // Teller only sees the Checking account — Chime Card is a separate Stride Bank credit account
+    // Include Checking AND Chime Card — exclude only internal Secured Deposit float transfers
     var re=/(\d{1,2}\/\d{1,2}\/\d{4})\s+([\s\S]*?)\s+(Round Up Transfer|Direct Debit|Transfer|Purchase|Deposit|Refund|Payment)\s+(-?\$[\d,]+\.\d{2})\s+(Checking|Chime Card|Secured Deposit Account)\s+\d{1,2}\/\d{1,2}\/\d{4}/g;
     var m;
     while((m=re.exec(text))!==null){
-      if(m[5]!=='Checking')continue; // Teller doesn't see Chime Card or Secured Deposit transactions
+      if(m[5]==='Secured Deposit Account')continue;
       var rawDesc=m[2].replace(/\s+/g,' ').trim();
       if(EXCLUDE.some(ex=>rawDesc.toLowerCase().includes(ex.toLowerCase())))continue;
       var dp=m[1].split('/');
@@ -1179,87 +1025,8 @@ async function parsePDFToText(base64){
   return Array.from(lineMap.keys()).sort((a,b)=>b-a).map(y=>lineMap.get(y).join(' ')).join('\n');
 }
 
-async function parseStatementPDF(files){
-  S.reconcileParsing=true;S.reconcileData=null;S.reconcileFiles=files.map(f=>({name:f.name,status:'pending'}));render();
-  try{
-    var allStmtTxns=[];
-    for(var i=0;i<files.length;i++){
-      S.reconcileFiles[i].status='parsing';render();
-      var base64=await new Promise((res,rej)=>{var r=new FileReader();r.onload=e=>res(e.target.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(files[i]);});
-      var text=await parsePDFToText(base64);
-      var txns=parseChimeStatementText(text);
-      S.reconcileFiles[i].status=txns.length?'done':'error';
-      S.reconcileFiles[i].count=txns.length;
-      allStmtTxns=allStmtTxns.concat(txns);
-      render();
-    }
-    if(!allStmtTxns.length)throw new Error('No transactions found in any statement — are these Chime checking statements?');
-    S.reconcileData=reconcileStatementTxns(allStmtTxns);
-  }catch(e){
-    console.error('Reconcile error',e);
-    S.reconcileData={error:e.message||'Parse failed'};
-  }
-  S.reconcileParsing=false;render();
-}
-
-function reconcileViewHtml(){
-  if(S.reconcileParsing){
-    var files=S.reconcileFiles||[];
-    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px"><h2 style="font-size:18px;font-weight:600">Reconcile Statements</h2></div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-    ${files.map(f=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
-      <p style="font-size:13px">${f.name}</p>
-      <p style="font-size:12px;color:${f.status==='done'?'var(--tx-ok)':f.status==='error'?'var(--tx-err)':'var(--tx2)'}">${f.status==='done'?'✓ '+f.count+' txns':f.status==='error'?'✗ no transactions':f.status==='parsing'?'Parsing…':'Waiting…'}</p>
-    </div>`).join('')}
-    </div></div>`;
-  }
-  if(S.reconcileData&&S.reconcileData.error){
-    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-size:18px;font-weight:600">Reconcile Statements</h2><button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Back</button></div><div style="background:var(--bg-err);border:1px solid var(--bd-err);border-radius:12px;padding:16px"><p style="color:var(--tx-err)">Error: ${S.reconcileData.error}</p></div></div>`;
-  }
-  if(S.reconcileData){
-    var d=S.reconcileData;
-    var files=S.reconcileFiles||[];
-    return`<div style="padding:16px 16px 0">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div><h2 style="font-size:18px;font-weight:600">Reconcile Results</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${fd(d.periodStart)} – ${fd(d.periodEnd)} · ${files.length} statement${files.length!==1?'s':''}</p></div>
-      <div style="display:flex;gap:6px">
-        ${d.dupes&&d.dupes.length?`<button class="btn" id="rec-delete-all-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Delete all (${d.dupes.length})</button>`:''}
-        <button class="btn" id="rec-upload-more-btn" style="font-size:13px;padding:6px 12px">+ Add more</button>
-        <button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Done</button>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
-      <div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:10px;padding:12px;text-align:center"><p class="mono" style="font-size:22px;font-weight:600;color:var(--tx-ok)">${d.matched?d.matched.length:0}</p><p style="font-size:11px;color:var(--tx-ok)">matched</p></div>
-      <div style="background:${d.dupes&&d.dupes.length?'var(--bg-err)':'var(--bg-ok)'};border:1px solid ${d.dupes&&d.dupes.length?'var(--bd-err)':'var(--bd-ok)'};border-radius:10px;padding:12px;text-align:center"><p class="mono" style="font-size:22px;font-weight:600;color:${d.dupes&&d.dupes.length?'var(--tx-err)':'var(--tx-ok)'}">${d.dupes?d.dupes.length:0}</p><p style="font-size:11px;color:${d.dupes&&d.dupes.length?'var(--tx-err)':'var(--tx-ok)'}">not in statement</p></div>
-    </div>
-    ${d.dupes&&d.dupes.length?`
-    <p style="font-size:13px;font-weight:500;margin-bottom:8px;color:var(--tx-err)">Not in statement — likely duplicates</p>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
-    ${d.dupes.map(t=>`<div style="background:var(--bg);border:1px solid var(--bd-err);border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
-      <div><p style="font-size:13px;font-weight:500">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}</p></div>
-      <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(t.amt)}</p><button class="btn" data-rec-del="${t.id}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
-    </div>`).join('')}
-    </div>`:'<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:24px;text-align:center;margin-bottom:16px"><p style="font-size:24px;margin-bottom:8px">🎉</p><p style="font-size:14px;color:var(--tx-ok)">All transactions match — no dupes found!</p></div>'}
-    <input type="file" id="rec-pdf-input" accept=".pdf" multiple style="display:none">
-    </div>`;
-  }
-  // Upload state
-  return`<div style="padding:16px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="font-size:18px;font-weight:600">Reconcile Statements</h2>
-    <button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Back</button>
-  </div>
-  <div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:20px">
-    <p style="font-size:14px;font-weight:500;margin-bottom:6px">Upload Chime PDF statements</p>
-    <p style="font-size:12px;color:var(--tx2);margin-bottom:16px">Select one or more monthly statements. Any Teller transactions that don't appear in the statements are confirmed duplicates.</p>
-    <input type="file" id="rec-pdf-input" accept=".pdf" multiple style="display:none">
-    <button class="btn" id="rec-upload-btn" style="width:100%;font-weight:500;color:var(--tx-info);border-color:var(--bd)">📄 Choose PDF statements</button>
-  </div>
-  </div>`;
-}
-
 function historyView(){
-  if(S.reconcileView)return reconcileViewHtml();
+  if(S.importView)return importViewHtml();
   var cats=gc();
   var uncatCount=(()=>{
     var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
@@ -1267,50 +1034,6 @@ function historyView(){
     uncat.forEach(t=>{var k=merchantKey(t.desc)+'|'+t.amt;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(t);});
     return Array.from(groups.values()).filter(g=>g.length>=2).reduce((s,g)=>s+g.length,0);
   })();
-
-  // Bulk categorize view
-  if(S.bulkDupes){
-    var pairs=allSuspectedDupes();
-    // Group pairs by merchant (first 2 words)
-    var groups=new Map();
-    pairs.forEach(dupe=>{
-      var key=(dupe.a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
-      if(!groups.has(key))groups.set(key,{merchant:dupe.a.desc,pairs:[]});
-      groups.get(key).pairs.push(dupe);
-    });
-    var groupArr=Array.from(groups.values()).filter(g=>g.pairs.length>=2).sort((a,b)=>b.pairs.length-a.pairs.length);
-    return`<div style="padding:16px 16px 0">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div><h2 style="font-size:18px;font-weight:600">Bulk Dupes</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${groupArr.length} merchant${groupArr.length!==1?'s':''} · ${pairs.length} pair${pairs.length!==1?'s':''}</p></div>
-      <div style="display:flex;gap:6px">
-        ${pairs.length>0?`<button class="btn" id="bulk-dupes-delete-all" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Delete all</button>`:''}
-        <button class="btn" id="bulk-dupes-done-btn" style="font-size:13px;padding:6px 14px">Done</button>
-      </div>
-    </div>
-    ${groupArr.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">No duplicate pairs found 🎉</p>':''}
-    <div style="display:flex;flex-direction:column;gap:10px">
-    ${groupArr.map(grp=>`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
-        <p style="font-size:14px;font-weight:500">${grp.merchant}</p>
-        <p style="font-size:11px;color:var(--tx-warn)">${grp.pairs.length} pair${grp.pairs.length!==1?'s':''}</p>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
-        ${grp.pairs.map(dupe=>{
-          var older=dupe.a.date<=dupe.b.date?dupe.a:dupe.b;
-          var newer=dupe.a.date<=dupe.b.date?dupe.b:dupe.a;
-          return`<div style="background:var(--bg2);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--tx2);display:flex;justify-content:space-between;align-items:center">
-            <span>${fd(older.date)} <span style="color:var(--tx-ok)">✓ keep</span> · ${fd(newer.date)} <span style="color:var(--tx-err)">× delete</span></span>
-            <span class="mono" style="flex-shrink:0;margin-left:8px">${fm(dupe.a.amt)}</span>
-          </div>`;
-        }).join('')}
-      </div>
-      <div style="display:flex;gap:6px">
-        <button class="btn" data-del-dupe-group="${grp.pairs.map(d=>d.a.id+'~~~'+d.b.id).join('||||')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx-err);border-color:var(--bd-err)">Delete duplicates (${grp.pairs.length})</button>
-        <button class="btn" data-dismiss-dupe-group="${grp.pairs.map(d=>d.a.id+'~~~'+d.b.id).join('||||')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx2)">Keep all</button>
-      </div>
-    </div>`).join('')}
-    </div></div>`;
-  }
 
   if(S.bulkCat){
     var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
@@ -1360,8 +1083,8 @@ function historyView(){
     <div style="display:flex;gap:6px">
       <button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button>
       ${uncatCount>5?`<button class="btn" id="bulk-cat-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Bulk (${uncatCount})</button>`:''}
-      ${(()=>{var dp=allSuspectedDupes();var grps=new Map();dp.forEach(d=>{var k=(d.a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');if(!grps.has(k))grps.set(k,[]);grps.get(k).push(d);});var bulkPairs=Array.from(grps.values()).filter(g=>g.length>=2).reduce((s,g)=>s+g.length,0);return bulkPairs>0?`<button class="btn" id="bulk-dupes-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Dupes (${bulkPairs})</button>`:''})()}      <button class="btn" id="export-csv-btn" style="font-size:13px;padding:6px 12px;color:var(--tx2)">↓ CSV</button>
-      <button class="btn" id="reconcile-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-info);border-color:var(--bd)">Reconcile</button>
+      <button class="btn" id="export-csv-btn" style="font-size:13px;padding:6px 12px;color:var(--tx2)">↓ CSV</button>
+      <button class="btn" id="import-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-info);border-color:var(--bd)">Import</button>
       <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
     </div>
   </div>
@@ -1432,22 +1155,47 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkDupes=false;S.reconcileView=false;S.reconcileData=null;S.reconcileFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.importView=false;S.importData=null;S.importFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
   var copyBtn=g('share-copy-btn');if(copyBtn)copyBtn.onclick=()=>{var inp=g('share-url-inp');if(inp){navigator.clipboard.writeText(inp.value).then(()=>{copyBtn.textContent='Copied!';setTimeout(()=>{copyBtn.textContent='Copy'},2000)})}};
   var revokeBtn=g('share-revoke-btn');if(revokeBtn)revokeBtn.onclick=async()=>{if(confirm('Revoke this link? Anyone using it will lose access.')){await revokeShare();render()}};
 
+  document.querySelectorAll('[data-bal-confirm]').forEach(el=>el.onclick=()=>{
+    var key=el.dataset.balConfirm;
+    var inp=g('bal-conf-inp-'+key);
+    var v=inp&&inp.value!==''?parseFloat(inp.value):null;
+    if(v!==null&&!isNaN(v)){
+      if(key==='chime')S.bal=Math.round(v*100)/100;
+      else if(key==='savings')S.chimeSavingsBal=Math.round(v*100)/100;
+      else if(key==='hsa')S.hsa=Math.round(v*100)/100;
+    }
+    var today=tod();
+    if(key==='chime')S.balConfirmedDate=today;
+    else if(key==='savings')S.savingsConfirmedDate=today;
+    else if(key==='hsa')S.hsaConfirmedDate=today;
+    save();render();
+  });
+  var skipAllConfirm=g('bal-confirm-skip');if(skipAllConfirm)skipAllConfirm.onclick=()=>{
+    var today=tod();
+    S.balConfirmedDate=today;S.savingsConfirmedDate=today;S.hsaConfirmedDate=today;
+    save();render();
+  };
   function ti(eb,fb,ib,val){var e=g(eb),f=g(fb),i=g(ib);if(!e||!f)return;e.onclick=()=>{var sh=f.style.display!=='none';f.style.display=sh?'none':'block';if(!sh&&i){i.value=val;i.focus()}}}
   ti('chime-eb','chime-f','chime-i',S.bal);ti('hsa-eb','hsa-f','hsa-i',S.hsa);
-  var csb=g('chime-sb');if(csb)csb.onclick=()=>{var v=parseFloat(g('chime-i').value);if(!isNaN(v)){S.bal=Math.round(v*100)/100;save();render()}};
-  var hsb=g('hsa-sb');if(hsb)hsb.onclick=()=>{var v=parseFloat(g('hsa-i').value);if(!isNaN(v)){S.hsa=Math.round(v*100)/100;save();render()}};
+  var csb=g('chime-sb');if(csb)csb.onclick=()=>{var v=parseFloat(g('chime-i').value);if(!isNaN(v)){S.bal=Math.round(v*100)/100;S.balConfirmedDate=tod();save();render()}};
+  var hsb=g('hsa-sb');if(hsb)hsb.onclick=()=>{var v=parseFloat(g('hsa-i').value);if(!isNaN(v)){S.hsa=Math.round(v*100)/100;S.hsaConfirmedDate=tod();save();render()}};
   var clb=g('chime-log');if(clb)clb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='chime';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
   var hlb=g('hsa-log');if(hlb)hlb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='hsa';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
-  var connectBtn=g('chime-connect');if(connectBtn)connectBtn.onclick=()=>openTellerConnect();
-  var relinkBtn=g('chime-relink');if(relinkBtn)relinkBtn.onclick=()=>openTellerConnect();
-  var syncBtn=g('chime-sync');if(syncBtn)syncBtn.onclick=()=>{if(!S.tellerSyncing)tellerSync()};
+  var importConfirmBtn=g('import-confirm-btn');if(importConfirmBtn)importConfirmBtn.onclick=()=>{
+    if(!S.importData||!S.importData.imported||!S.importData.imported.length){S.importView=false;S.importData=null;S.importFiles=[];render();return;}
+    S.txns=S.importData.imported.concat(S.txns);
+    deduplicateTxns();
+    S.importView=false;S.importData=null;S.importFiles=[];
+    save();render();
+  };
+  var importBtn=g('import-btn');
 
   // Categorize transaction banners
   document.querySelectorAll('[data-cat-assign]').forEach(el=>el.onclick=()=>{
@@ -1538,25 +1286,27 @@ function bind(){
     S.disPcs=S.disPcs.concat([pid]);save();render();
   });
   document.querySelectorAll('[data-pc-skip]').forEach(el=>el.onclick=()=>{S.disPcs=S.disPcs.concat([el.dataset.pcSkip]);render()});
+  document.querySelectorAll('[data-bill-confirm]').forEach(el=>el.onclick=()=>{
+    var bid=el.dataset.billConfirm;
+    var bill=S.bills.find(b=>b.id===bid);if(!bill)return;
+    var amtInp=g('bill-conf-amt-'+bid);
+    var amt=amtInp&&amtInp.value!==''?Math.abs(parseFloat(amtInp.value)):bill.amt;
+    if(isNaN(amt)||amt<=0)amt=bill.amt;
+    // Create bill payment transaction
+    S.txns=[{id:uid(),desc:bill.name,amt:-amt,date:tod(),account:'chime',isBillPayment:true,billId:bid}].concat(S.txns);
+    S.bal=Math.round((S.bal-amt)*100)/100;
+    // Advance nextDue
+    S.bills=S.bills.map(b=>b.id===bid?{...b,nextDue:adv(b)}:b);
+    S.disBills=S.disBills.concat([bid]);
+    save();render();
+  });
+  document.querySelectorAll('[data-bill-skip]').forEach(el=>el.onclick=()=>{
+    S.disBills=S.disBills.concat([el.dataset.billSkip]);render();
+  });
 
   var sdb=g('savings-deposit-btn');if(sdb)sdb.onclick=()=>{S.showDeposit=true;S.showWithdraw=false;S.savingsDepositGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
   var swb=g('savings-withdraw-btn');if(swb)swb.onclick=()=>{S.showWithdraw=true;S.showDeposit=false;S.savingsWithdrawGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
-  document.querySelectorAll('[data-del-dupe]').forEach(el=>el.onclick=()=>{
-    var txId=el.dataset.delDupe,pairKey=el.dataset.dupePair;
-    var tx=S.txns.find(t=>t.id===txId);
-    if(tx){
-      if(tx.cat){var env=S.envelopes[tx.cat]||0;S.envelopes={...S.envelopes,[tx.cat]:Math.round((env+Math.abs(tx.amt))*100)/100};}
-      if(tx.account==='hsa')S.hsa=Math.round((S.hsa+Math.abs(tx.amt))*100)/100;
-      else if(tx.account!=='chimeSavings')S.bal=Math.round((S.bal-tx.amt)*100)/100;
-    }
-    S.txns=S.txns.filter(t=>t.id!==txId);
-    S.dismissedDupes=[...S.dismissedDupes,pairKey];
-    save();render();
-  });
-  document.querySelectorAll('[data-dismiss-dupe]').forEach(el=>el.onclick=()=>{
-    S.dismissedDupes=[...S.dismissedDupes,el.dataset.dismissDupe];
-    save();render();
-  });
+  var bulkBtn=g('bulk-cat-btn');
   document.querySelectorAll('[data-deposit-goal]').forEach(el=>el.onclick=()=>{S.savingsDepositGoalId=el.dataset.depositGoal;render()});
   document.querySelectorAll('[data-withdraw-goal]').forEach(el=>el.onclick=()=>{S.savingsWithdrawGoalId=el.dataset.withdrawGoal;render()});
   var asSave=g('savings-amt-save');if(asSave)asSave.onclick=()=>{
@@ -1576,7 +1326,7 @@ function bind(){
       var wdName=wdGoalId&&wdGoalId!=='__unallocated'?(S.savingsGoals.find(g=>g.id===wdGoalId)||{name:''}).name:'';
       S.txns=[{id:uid(),desc:'Transfer from savings'+(wdName?' \u2014 '+wdName:''),amt:v,date:tod(),account:'chime',txType:'savings_withdrawal'}].concat(S.txns);
     }
-    S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;save();render();
+    S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;S.savingsConfirmedDate=tod();save();render();
   };
   var asCancel=g('savings-amt-cancel');if(asCancel)asCancel.onclick=()=>{S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;render()};
 
@@ -1631,7 +1381,7 @@ function bind(){
   document.querySelectorAll('[data-el]').forEach(el=>el.onclick=()=>{S.editLoan=el.dataset.el;S.loanForm=true;render()});
   document.querySelectorAll('[data-dell]').forEach(el=>el.onclick=()=>{S.loans=S.loans.filter(l=>l.id!==el.dataset.dell);save();render()});
   document.querySelectorAll('[data-pl]').forEach(el=>el.onclick=()=>{S.loanPay=S.loanPay===el.dataset.pl?null:el.dataset.pl;render()});
-  var lps=g('lp-save');if(lps)lps.onclick=()=>{var lid=lps.dataset.lid,v=parseFloat(g('lp-amt').value);if(isNaN(v)||v<=0)return;var ln=(S.loans.find(l=>l.id===lid)||{name:'Loan'}).name;S.loans=S.loans.map(l=>l.id===lid?{...l,bal:Math.max(0,Math.round((l.bal-v)*100)/100)}:l);S.bal=Math.round((S.bal-v)*100)/100;S.txns=[{id:uid(),desc:ln+' payment',amt:-v,date:tod(),account:'chime'}].concat(S.txns);S.loanPay=null;save();render()};
+  var lps=g('lp-save');if(lps)lps.onclick=()=>{var lid=lps.dataset.lid,v=parseFloat(g('lp-amt').value);if(isNaN(v)||v<=0)return;var ln=(S.loans.find(l=>l.id===lid)||{name:'Loan'}).name;S.loans=S.loans.map(l=>l.id===lid?{...l,bal:Math.max(0,Math.round((l.bal-v)*100)/100)}:l);S.bal=Math.round((S.bal-v)*100)/100;S.txns=[{id:uid(),desc:ln+' payment',amt:-v,date:tod(),account:'chime',isLoanPayment:true,loanId:lid}].concat(S.txns);S.loanPay=null;save();render()};
   var lpc=g('lp-cancel');if(lpc)lpc.onclick=()=>{S.loanPay=null;render()};
   var lfs=g('lfSave');if(lfs)lfs.onclick=()=>{var name=(g('lfName').value||'').trim(),orig=parseFloat(g('lfOrig').value),be=g('lfBal'),bal=be?parseFloat(be.value):orig;if(!name||isNaN(orig)||orig<=0)return;if(S.editLoan){S.loans=S.loans.map(l=>l.id===S.editLoan?{id:S.editLoan,name,orig:Math.round(orig*100)/100,bal:Math.round((isNaN(bal)?orig:bal)*100)/100}:l)}else{S.loans=S.loans.concat([{id:uid(),name,orig:Math.round(orig*100)/100,bal:Math.round(orig*100)/100}])}S.loanForm=false;S.editLoan=null;save();render()};
   var lfc=g('lfCancel');if(lfc)lfc.onclick=()=>{S.loanForm=false;S.editLoan=null;render()};
@@ -1650,76 +1400,11 @@ function bind(){
   var cc=g('catCancel');if(cc)cc.onclick=()=>{S.catForm=false;S.editCat=null;render()};
 
   function ttf(){S.txForm=!S.txForm;render()}
-  var reconcileBtn=g('reconcile-btn');if(reconcileBtn)reconcileBtn.onclick=()=>{S.reconcileView=true;S.reconcileData=null;S.reconcileFiles=[];render()};
-  var recBackBtn=g('rec-back-btn');if(recBackBtn)recBackBtn.onclick=()=>{S.reconcileView=false;S.reconcileData=null;S.reconcileFiles=[];render()};
-  var recUploadBtn=g('rec-upload-btn');if(recUploadBtn)recUploadBtn.onclick=()=>g('rec-pdf-input').click();
-  var recUploadMoreBtn=g('rec-upload-more-btn');if(recUploadMoreBtn)recUploadMoreBtn.onclick=()=>g('rec-pdf-input').click();
-  var recPdfInput=g('rec-pdf-input');if(recPdfInput)recPdfInput.onchange=e=>{
-    var files=Array.from(e.target.files);if(!files.length)return;
-    parseStatementPDF(files);
-  };
-  var recDeleteAll=g('rec-delete-all-btn');if(recDeleteAll)recDeleteAll.onclick=()=>{
-    if(!S.reconcileData||!S.reconcileData.dupes||!S.reconcileData.dupes.length)return;
-    if(!confirm('Delete all '+S.reconcileData.dupes.length+' unmatched transactions? These are not in your statement.'))return;
-    S.reconcileData.dupes.forEach(t=>{
-      if(t.cat){var env=S.envelopes[t.cat]||0;S.envelopes={...S.envelopes,[t.cat]:Math.round((env+Math.abs(t.amt))*100)/100};}
-      adjAcct(t.account||'chime',-t.amt);
-      S.txns=S.txns.filter(x=>x.id!==t.id);
-    });
-    S.reconcileData={...S.reconcileData,dupes:[],matched:(S.reconcileData.matched||[])};
-    save();render();
-  };
-  document.querySelectorAll('[data-rec-del]').forEach(el=>el.onclick=()=>{
-    var t=S.txns.find(x=>x.id===el.dataset.recDel);if(!t)return;
-    if(t.cat){var env=S.envelopes[t.cat]||0;S.envelopes={...S.envelopes,[t.cat]:Math.round((env+Math.abs(t.amt))*100)/100};}
-    adjAcct(t.account||'chime',-t.amt);
-    S.txns=S.txns.filter(x=>x.id!==t.id);
-    if(S.reconcileData)S.reconcileData={...S.reconcileData,dupes:S.reconcileData.dupes.filter(x=>x.id!==t.id)};
-    save();render();
-  });
+  var importBackBtn=g('import-back-btn');if(importBackBtn)importBackBtn.onclick=()=>{S.importView=false;S.importData=null;S.importFiles=[];render()};
+  var importUploadBtn=g('import-upload-btn');if(importUploadBtn)importUploadBtn.onclick=()=>g('import-pdf-input').click();
+  var importUploadMoreBtn=g('import-upload-more-btn');if(importUploadMoreBtn)importUploadMoreBtn.onclick=()=>g('import-pdf-input').click();
+  var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
-  document.querySelectorAll('[data-del-dupe-group]').forEach(el=>el.onclick=()=>{
-    var entries=el.dataset.delDupeGroup.split('||||');
-    entries.forEach(entry=>{
-      var parts=entry.split('~~~');
-      var aId=parts[0],bId=parts[1];
-      var pairKey=[aId,bId].sort().join('|');
-      var txA=S.txns.find(t=>t.id===aId),txB=S.txns.find(t=>t.id===bId);
-      if(!txA||!txB)return;
-      var toDelete=txA.date>=txB.date?txA:txB;
-      if(toDelete.cat){var env=S.envelopes[toDelete.cat]||0;S.envelopes={...S.envelopes,[toDelete.cat]:Math.round((env+Math.abs(toDelete.amt))*100)/100};}
-      if(toDelete.account==='hsa')S.hsa=Math.round((S.hsa+Math.abs(toDelete.amt))*100)/100;
-      else if(toDelete.account!=='chimeSavings')S.bal=Math.round((S.bal-toDelete.amt)*100)/100;
-      S.txns=S.txns.filter(t=>t.id!==toDelete.id);
-      S.dismissedDupes=[...S.dismissedDupes,pairKey];
-    });
-    save();render();
-  });
-  document.querySelectorAll('[data-dismiss-dupe-group]').forEach(el=>el.onclick=()=>{
-    var entries=el.dataset.dismissDupeGroup.split('||||');
-    var pairKeys=entries.map(e=>{var p=e.split('~~~');return[p[0],p[1]].sort().join('|');});
-    S.dismissedDupes=[...S.dismissedDupes,...pairKeys];
-    save();render();
-  });
-  var bulkDupesDeleteAll=g('bulk-dupes-delete-all');if(bulkDupesDeleteAll)bulkDupesDeleteAll.onclick=()=>{
-    if(!confirm('Delete one transaction from each duplicate pair? This keeps the older entry and removes the newer one.'))return;
-    var pairs=allSuspectedDupes();
-    pairs.forEach(dupe=>{
-      // Keep the older transaction (earlier date), delete the newer one
-      var toDelete=dupe.a.date>=dupe.b.date?dupe.a:dupe.b;
-      var tx=S.txns.find(t=>t.id===toDelete.id);
-      if(tx){
-        if(tx.cat){var env=S.envelopes[tx.cat]||0;S.envelopes={...S.envelopes,[tx.cat]:Math.round((env+Math.abs(tx.amt))*100)/100};}
-        if(tx.account==='hsa')S.hsa=Math.round((S.hsa+Math.abs(tx.amt))*100)/100;
-        else if(tx.account!=='chimeSavings')S.bal=Math.round((S.bal-tx.amt)*100)/100;
-      }
-      S.txns=S.txns.filter(t=>t.id!==toDelete.id);
-      S.dismissedDupes=[...S.dismissedDupes,dupe.pairKey];
-    });
-    S.bulkDupes=false;save();render();
-  };
-  var bulkDupesBtn=g('bulk-dupes-btn');if(bulkDupesBtn)bulkDupesBtn.onclick=()=>{S.bulkDupes=true;render()};
-  var bulkDupesDone=g('bulk-dupes-done-btn');if(bulkDupesDone)bulkDupesDone.onclick=()=>{S.bulkDupes=false;render()};
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
   document.querySelectorAll('[data-bulk-assign]').forEach(el=>el.onclick=()=>{
@@ -1759,10 +1444,8 @@ function bind(){
   var ffrom=g('filt-from');if(ffrom)ffrom.onchange=()=>{S.filtFrom=ffrom.value;render()};
   var fto=g('filt-to');if(fto)fto.onchange=()=>{S.filtTo=fto.value;render()};
   var resetBtn=g('reset-txns-btn');if(resetBtn)resetBtn.onclick=()=>{
-    if(!confirm('Clear ALL transactions and re-sync from Chime? This cannot be undone.'))return;
-    S.txns=[];S.tellerLastSync=null;save();
-    if(S.tellerToken&&S.tellerAccountId)tellerSync();
-    else render();
+    if(!confirm('Clear ALL transactions? This cannot be undone.'))return;
+    S.txns=[];save();render();
   };
   document.querySelectorAll('[data-et]').forEach(el=>el.onclick=()=>{S.editTx=S.editTx===el.dataset.et?null:el.dataset.et;render()});
   document.querySelectorAll('[data-et-cancel]').forEach(el=>el.onclick=()=>{S.editTx=null;render()});
@@ -1832,7 +1515,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[],bulkCat:false,bulkDupes:false,reconcileView:false,reconcileData:null,reconcileParsing:false,reconcileFiles:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,importView:false,importData:null,importParsing:false,importFiles:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
