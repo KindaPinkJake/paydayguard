@@ -248,6 +248,10 @@ async function tellerSync(){
   if(!S.tellerToken||!S.tellerAccountId)return;
   S.tellerSyncing=true;render();
   try{
+    // Log all available accounts so we can see what Teller returns
+    var acctRes=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken})});
+    var acctData=await acctRes.json();
+    console.log('TELLER ACCOUNTS:',JSON.stringify(acctData.accounts||acctData,null,2));
     // Sync checking balance
     var balRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId})});
     var balData=await balRes.json();
