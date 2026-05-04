@@ -224,6 +224,15 @@ async function tellerSync(){
     var txRes=await fetch(FUNCTIONS_BASE+'/getTransactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId,count:500})});
     var txData=await txRes.json();
     if(txData.transactions&&txData.transactions.length){
+      // DEBUG: log raw Teller data to understand status/amount fields
+      console.log('TELLER RAW SAMPLE (first 10):');
+      txData.transactions.slice(0,10).forEach(t=>console.log(JSON.stringify({id:t.id,date:t.date,amount:t.amount,status:t.status,type:t.type,desc:t.description})));
+      var dupeCheck={};
+      txData.transactions.forEach(t=>{
+        var key=t.date+'|'+t.amount+'|'+(t.description||'').trim();
+        if(dupeCheck[key])console.log('TELLER DUPE:',JSON.stringify({id:t.id,date:t.date,amount:t.amount,status:t.status,desc:t.description}),'vs',JSON.stringify({id:dupeCheck[key].id,status:dupeCheck[key].status}));
+        else dupeCheck[key]=t;
+      });
       var existing=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
       // Fix existing Teller transactions that were misclassified before income detection was added
       S.txns=S.txns.map(t=>{
