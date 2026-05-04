@@ -63,7 +63,8 @@ var S={
   tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,
   billAssignTxId:null,editTx:null,
   goalForm:false,editGoal:null,
-  merchantMemory:{}
+  merchantMemory:{},
+  dismissedDupes:[]
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -131,6 +132,7 @@ function startListener(){
       S.tellerLastSync=d.tellerLastSync||null;
       S.shareToken=d.shareToken||null;
       S.merchantMemory=d.merchantMemory||{};
+      S.dismissedDupes=d.dismissedDupes||[];
     }
     render();
     // One-time migration: clean existing duplicates (pending→settled with different tellerIds)
@@ -178,7 +180,7 @@ function save(){
   if(!U)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerSavingsAccountId:S.tellerSavingsAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken,merchantMemory:S.merchantMemory})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,tellerToken:S.tellerToken,tellerAccountId:S.tellerAccountId,tellerSavingsAccountId:S.tellerSavingsAccountId,tellerLastSync:S.tellerLastSync,shareToken:S.shareToken,merchantMemory:S.merchantMemory,dismissedDupes:S.dismissedDupes})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -512,6 +514,28 @@ var MERCHANT_HINTS=[
   {words:['cvs','walgreen','rite aid','pharmacy','doctor','medical','dental','vision','clinic','hospital','urgent care','health','prescription'],label:'health'},
 ];
 
+function firstSuspectedDupe(){
+  // Find two expense transactions: same merchant (first 2 words), within 3 days, different amounts
+  var expenses=S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings');
+  for(var i=0;i<expenses.length;i++){
+    var a=expenses[i];
+    var aWords=(a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
+    if(!aWords||aWords.length<3)continue;
+    for(var j=i+1;j<expenses.length;j++){
+      var b=expenses[j];
+      var bWords=(b.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
+      if(aWords!==bWords)continue;
+      if(Math.abs(a.amt-b.amt)<0.01)continue; // exact match handled by dedup
+      var dayDiff=Math.abs((new Date(a.date+'T00:00:00')-new Date(b.date+'T00:00:00'))/86400000);
+      if(dayDiff>3)continue;
+      var pairKey=[a.id,b.id].sort().join('|');
+      if(S.dismissedDupes.includes(pairKey))continue;
+      return{a,b,pairKey};
+    }
+  }
+  return null;
+}
+
 function merchantKey(desc){
   if(!desc)return'';
   // Normalize: lowercase, strip punctuation, take first 4 words
@@ -765,6 +789,21 @@ function homeView(){
   </div>`:''}
   <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">${bcard('Chime','chime',S.bal)}${bcard('HSA','hsa',S.hsa)}</div>
   ${savingsCard()}
+  ${(()=>{var dupe=firstSuspectedDupe();return dupe?`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <p style="font-size:13px;font-weight:600;color:var(--tx-warn);margin-bottom:4px">⚠ Possible duplicate charge</p>
+    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Same merchant, ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart — is one a duplicate?</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+        <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
+        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.a.amt)}</p><button class="btn" data-del-dupe="${dupe.a.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+      </div>
+      <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+        <div><p style="font-size:13px;font-weight:500">${dupe.b.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.b.date)}</p></div>
+        <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.b.amt)}</p><button class="btn" data-del-dupe="${dupe.b.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+      </div>
+    </div>
+    <button class="btn" data-dismiss-dupe="${dupe.pairKey}" style="width:100%;font-size:12px;padding:6px;color:var(--tx2)">Both are real — keep both</button>
+  </div>`:'';})()}
   ${msg?`<div style="background:${st.bg};border:1px solid ${st.br};border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:${st.c}">${msg}</div>`:''}
   <div style="border-radius:12px;padding:16px;margin-bottom:10px;border:1px solid ${st.br};background:${st.bg}">
     <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:${st.c};margin-bottom:4px">Safe to spend</p>
@@ -1118,7 +1157,22 @@ function bind(){
 
   var sdb=g('savings-deposit-btn');if(sdb)sdb.onclick=()=>{S.showDeposit=true;S.showWithdraw=false;S.savingsDepositGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
   var swb=g('savings-withdraw-btn');if(swb)swb.onclick=()=>{S.showWithdraw=true;S.showDeposit=false;S.savingsWithdrawGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
-  document.querySelectorAll('[data-deposit-goal]').forEach(el=>el.onclick=()=>{S.savingsDepositGoalId=el.dataset.depositGoal;render()});
+  document.querySelectorAll('[data-del-dupe]').forEach(el=>el.onclick=()=>{
+    var txId=el.dataset.delDupe,pairKey=el.dataset.dupePair;
+    var tx=S.txns.find(t=>t.id===txId);
+    if(tx){
+      if(tx.cat){var env=S.envelopes[tx.cat]||0;S.envelopes={...S.envelopes,[tx.cat]:Math.round((env+Math.abs(tx.amt))*100)/100};}
+      if(tx.account==='hsa')S.hsa=Math.round((S.hsa+Math.abs(tx.amt))*100)/100;
+      else if(tx.account!=='chimeSavings')S.bal=Math.round((S.bal-tx.amt)*100)/100;
+    }
+    S.txns=S.txns.filter(t=>t.id!==txId);
+    S.dismissedDupes=[...S.dismissedDupes,pairKey];
+    save();render();
+  });
+  document.querySelectorAll('[data-dismiss-dupe]').forEach(el=>el.onclick=()=>{
+    S.dismissedDupes=[...S.dismissedDupes,el.dataset.dismissDupe];
+    save();render();
+  });
   document.querySelectorAll('[data-withdraw-goal]').forEach(el=>el.onclick=()=>{S.savingsWithdrawGoalId=el.dataset.withdrawGoal;render()});
   var asSave=g('savings-amt-save');if(asSave)asSave.onclick=()=>{
     var v=parseFloat((g('savings-amt-inp')||{}).value);if(isNaN(v)||v<=0)return;
@@ -1300,7 +1354,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{}});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
