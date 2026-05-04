@@ -1103,21 +1103,59 @@ function reconcileStatementTxns(stmtTxns){
   return{dupes,matched,periodStart,periodEnd,total:tellerTxns.length};
 }
 
+function parseChimeStatementText(text){
+  var txns=[];
+  var EXCLUDE=['Moved from Secured Deposit Account','Moved to Secured Deposit Account'];
+  // Match: date · description · type keyword · amount · net amount · settlement date
+  var re=/(\d{1,2}\/\d{1,2}\/\d{4})\s+([\s\S]*?)\s+(Round Up Transfer|Direct Debit|Transfer|Purchase|Deposit)\s+(-?\$[\d,]+\.\d{2})\s+-?\$[\d,]+\.\d{2}\s+\d{1,2}\/\d{1,2}\/\d{4}/g;
+  var m;
+  while((m=re.exec(text))!==null){
+    var rawDesc=m[2].replace(/\s+/g,' ').trim();
+    if(EXCLUDE.some(ex=>rawDesc.includes(ex)))continue;
+    var dp=m[1].split('/');
+    var isoDate=dp[2]+'-'+dp[0].padStart(2,'0')+'-'+dp[1].padStart(2,'0');
+    var amt=parseFloat(m[4].replace(/[$,]/g,''));
+    txns.push({date:isoDate,description:rawDesc,amount:amt});
+  }
+  return txns;
+}
+
 async function parseStatementPDF(base64){
   S.reconcileParsing=true;S.reconcileData=null;render();
   try{
-    var res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      model:'claude-sonnet-4-20250514',max_tokens:2000,
-      messages:[{role:'user',content:[
-        {type:'document',source:{type:'base64',media_type:'application/pdf',data:base64}},
-        {type:'text',text:'Extract all real financial transactions from this Chime bank statement. Return ONLY a raw JSON array, no markdown fences, no explanation. Format: [{"date":"2026-04-30","description":"Subway","amount":-9.20}]. Rules: (1) EXCLUDE every row labeled "Moved from Secured Deposit Account" or "Moved to Secured Deposit Account" — these are internal Chime float transfers, not real transactions. (2) INCLUDE everything else: Purchases, Deposits, Direct Debits, Round Up Transfers, Transfer to Chime Savings Account, Instant Loan Payment. (3) Negative amounts for money out, positive for money in. (4) Date format YYYY-MM-DD.'}
-      ]}]
-    })});
-    var data=await res.json();
-    var text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
-    var stmtTxns=JSON.parse(text.replace(/```json|```/g,'').trim());
+    // Load PDF.js on demand
+    if(!window.pdfjsLib){
+      await new Promise((resolve,reject)=>{
+        var s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        s.onload=resolve;s.onerror=reject;document.head.appendChild(s);
+      });
+      pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    // Decode base64 to bytes
+    var binary=atob(base64),bytes=new Uint8Array(binary.length);
+    for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    // Extract text grouped by y-position to reconstruct lines
+    var pdf=await pdfjsLib.getDocument({data:bytes}).promise;
+    var lineMap=new Map();
+    for(var p=1;p<=pdf.numPages;p++){
+      var page=await pdf.getPage(p);
+      var content=await page.getTextContent();
+      content.items.forEach(item=>{
+        if(!item.str.trim())return;
+        var y=Math.round(item.transform[5]);
+        if(!lineMap.has(y))lineMap.set(y,[]);
+        lineMap.get(y).push(item.str);
+      });
+    }
+    var fullText=Array.from(lineMap.keys()).sort((a,b)=>b-a).map(y=>lineMap.get(y).join(' ')).join('\n');
+    var stmtTxns=parseChimeStatementText(fullText);
+    if(!stmtTxns.length)throw new Error('No transactions found — is this a Chime checking statement?');
     S.reconcileData=reconcileStatementTxns(stmtTxns);
-  }catch(e){console.error('Reconcile error',e);S.reconcileData={error:e.message||'Parse failed'};}
+  }catch(e){
+    console.error('Reconcile error',e);
+    S.reconcileData={error:e.message||'Parse failed'};
+  }
   S.reconcileParsing=false;render();
 }
 
