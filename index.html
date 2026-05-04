@@ -647,7 +647,10 @@ function banners(){
   var dupe=firstSuspectedDupe();
   if(dupe){
     h+=`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-    <p style="font-size:13px;font-weight:600;color:var(--tx-warn);margin-bottom:4px">⚠ Possible duplicate charge</p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+      <p style="font-size:13px;font-weight:600;color:var(--tx-warn)">⚠ Possible duplicate charge</p>
+      ${(()=>{var total=0;var seen=new Set();S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings').forEach(a=>{var aW=(a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');if(!aW||aW.length<3)return;S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings').forEach(b=>{if(b.id===a.id)return;var bW=(b.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');if(aW!==bW)return;if(Math.abs(a.amt-b.amt)<0.01)return;var diff=Math.abs((new Date(a.date+'T00:00:00')-new Date(b.date+'T00:00:00'))/86400000);if(diff>3)return;var pk=[a.id,b.id].sort().join('|');if(S.dismissedDupes.includes(pk))return;if(!seen.has(pk)){seen.add(pk);total++;}});});return total>1?`<span style="font-size:11px;color:var(--tx-warn);background:var(--bg-warn);padding:3px 8px;border-radius:6px">${total} pairs</span>`:''})()}
+    </div>
     <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Same merchant, ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart — is one a duplicate?</p>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
       <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
