@@ -1086,7 +1086,7 @@ function reconcileStatementTxns(stmtTxns){
   var dates=stmtTxns.map(t=>t.date).sort();
   var periodStart=dates[0],periodEnd=dates[dates.length-1];
   // All Teller-imported Chime transactions in the period
-  var tellerTxns=S.txns.filter(t=>t.account==='chime'&&t.tellerId&&t.date>=periodStart&&t.date<=periodEnd);
+  var tellerTxns=S.txns.filter(t=>t.account==='chime'&&t.tellerId&&t.date>=periodStart&&t.date<=periodEnd&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.amt<0);
   var matched=[],dupes=[];
   tellerTxns.forEach(t=>{
     var cents=Math.round(t.amt*100);
