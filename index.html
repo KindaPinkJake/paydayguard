@@ -62,7 +62,7 @@ var S={
   filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
   shareToken:null,showSharePanel:false,
   balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,
-  billAssignTxId:null,loanAssignTxId:null,editTx:null,
+  billPayId:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,pendingBillLog:null,
   goalForm:false,editGoal:null,
   merchantMemory:{},
   bulkCat:false,
@@ -394,17 +394,16 @@ function banners(){
     var b=due[0];
     var overdue=b.nextDue<tod();
     return`<div style="background:var(--bg);border:1px solid ${overdue?'var(--bd-err)':'var(--bd-warn)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div>
         <p style="font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'}">${overdue?'⚠ Overdue':'📅 Due today'} — ${b.name}</p>
-        <p style="font-size:11px;color:var(--tx2);margin-top:2px">${overdue?'Was due '+fd(b.nextDue):'Due today'} · typical ${fm(b.amt)}</p>
+        <p style="font-size:11px;color:var(--tx2);margin-top:2px">${overdue?'Was due '+fd(b.nextDue):'Due today'} · ${fm(b.amt)}</p>
       </div>
       ${due.length>1?`<span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${due.length} bills</span>`:''}
     </div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <input class="field mono" id="bill-conf-amt-${b.id}" type="number" step="0.01" placeholder="${b.amt.toFixed(2)}" style="flex:1">
-      <button class="btn" data-bill-confirm="${b.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">✓ Paid</button>
-      <button class="btn" data-bill-skip="${b.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Not yet</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn" data-bill-log="${b.id}" style="flex:1;font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'};border-color:${overdue?'var(--bd-err)':'var(--bd-warn)'}">+ Log payment</button>
+      <button class="btn" data-bill-skip="${b.id}" style="font-size:13px;padding:9px 14px;color:var(--tx2)">Not yet</button>
     </div>
     </div>`;
   }
@@ -448,10 +447,6 @@ function banners(){
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         ${cats.map(c=>{var cl=co(c.color);var isSuggested=c.id===suggested;return`<button data-cat-assign="${unc.id}" data-cat-val="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:${isSuggested?'2px solid '+cl.c:'1px solid '+cl.c};background:${isSuggested?cl.c:cl.bg};color:${isSuggested?'var(--bg)':cl.c};font-weight:${isSuggested?'600':'400'}">${isSuggested?'✓ ':''} ${c.label}</button>`}).join('')}
-      </div>
-      <div style="display:flex;gap:6px;margin-bottom:${(S.billAssignTxId===unc.id||unc.suggestedBillId||S.loanAssignTxId===unc.id||unc.suggestedLoanId)?'8':'0'}px">
-        <button data-cat-bill="${unc.id}" class="btn" style="flex:1;font-size:12px;padding:6px;color:var(--tx-warn);border-color:var(--bd-warn)">Bill payment →</button>
-        ${S.loans.length?`<button data-cat-loan="${unc.id}" class="btn" style="flex:1;font-size:12px;padding:6px;color:var(--tx-info);border-color:var(--bd)">Loan payment →</button>`:''}
       </div>
       ${(S.billAssignTxId===unc.id||unc.suggestedBillId)&&S.bills.length?`<div style="margin-top:4px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedBillId?'Looks like this bill:':'Which bill is this?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>{var isSug=b.id===unc.suggestedBillId;return`<button data-bill-assign="${unc.id}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-ok);background:var(--bg-ok);':''}"><span>${isSug?'✓ ':''} ${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`;}).join('')}</div></div>`:''}
       ${(S.loanAssignTxId===unc.id||unc.suggestedLoanId)&&S.loans.length?`<div style="margin-top:4px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedLoanId?'Looks like this loan:':'Which loan is this for?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.loans.map(l=>{var isSug=l.id===unc.suggestedLoanId;return`<button data-loan-assign="${unc.id}" data-loan-id="${l.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-info);background:var(--bg-info);':''}"><span>${isSug?'✓ ':''} ${l.name}</span><span class="mono" style="color:var(--tx-err)">${fm(l.bal)} remaining</span></button>`;}).join('')}</div></div>`:''}
@@ -666,7 +661,7 @@ function txForm(){
       <option value="hsa"${S.txAcct==='hsa'?' selected':''}>HSA</option>
     </select>
   </div>
-  ${isExp?`<div style="margin-bottom:10px"><label>Category <span style="color:var(--tx-err)">*</span></label><select class="field" id="txC"><option value="">— select —</option>${cats.map(c=>`<option value="${c.id}">${c.label}</option>`).join('')}</select></div>`:''}
+  ${isExp?`<div style="margin-bottom:10px"><label>Category <span style="color:var(--tx-err)">*</span></label><select class="field" id="txC"><option value="">— select —</option><optgroup label="Spending">${cats.map(c=>`<option value="cat:${c.id}"${S.pendingBillLog?'':''}}>${c.label}</option>`).join('')}</optgroup>${S.bills.length?`<optgroup label="Bill payment">${S.bills.map(b=>`<option value="bill:${b.id}"${S.pendingBillLog&&S.pendingBillLog.id===b.id?' selected':''}>${b.name}</option>`).join('')}</optgroup>`:''}</select></div>`:''}
   <div style="display:flex;gap:8px">
     <button class="btn" id="txS" style="flex:1;font-weight:500">Save</button>
     <button class="btn" id="txX" style="flex:1">Cancel</button>
@@ -1297,19 +1292,16 @@ function bind(){
     S.disPcs=S.disPcs.concat([pid]);save();render();
   });
   document.querySelectorAll('[data-pc-skip]').forEach(el=>el.onclick=()=>{S.disPcs=S.disPcs.concat([el.dataset.pcSkip]);render()});
-  document.querySelectorAll('[data-bill-confirm]').forEach(el=>el.onclick=()=>{
-    var bid=el.dataset.billConfirm;
+  document.querySelectorAll('[data-bill-log]').forEach(el=>el.onclick=()=>{
+    var bid=el.dataset.billLog;
     var bill=S.bills.find(b=>b.id===bid);if(!bill)return;
-    var amtInp=g('bill-conf-amt-'+bid);
-    var amt=amtInp&&amtInp.value!==''?Math.abs(parseFloat(amtInp.value)):bill.amt;
-    if(isNaN(amt)||amt<=0)amt=bill.amt;
-    // Create bill payment transaction
-    S.txns=[{id:uid(),desc:bill.name,amt:-amt,date:tod(),account:'chime',isBillPayment:true,billId:bid}].concat(S.txns);
-    S.bal=Math.round((S.bal-amt)*100)/100;
-    // Advance nextDue
-    S.bills=S.bills.map(b=>b.id===bid?{...b,nextDue:adv(b)}:b);
-    S.disBills=S.disBills.concat([bid]);
-    save();render();
+    S.txForm=true;S.txType='expense';S.txAcct='chime';S.pendingBillLog={id:bid,amt:bill.amt,name:bill.name};
+    render();
+    setTimeout(()=>{
+      var d=document.getElementById('txD');if(d)d.value=bill.name;
+      var a=document.getElementById('txA');if(a)a.value=bill.amt.toFixed(2);
+      var c=document.getElementById('txC');if(c)c.value='bill:'+bid;
+    },50);
   });
   document.querySelectorAll('[data-bill-skip]').forEach(el=>el.onclick=()=>{
     S.disBills=S.disBills.concat([el.dataset.billSkip]);render();
@@ -1440,16 +1432,29 @@ function bind(){
     var desc=(g('txD').value||'').trim(),amt=parseFloat(g('txA').value),date=g('txDt').value||tod();
     var acct=(g('txAcctSel')||{}).value||S.txAcct||'chime';
     var isExp=S.txType==='expense';
-    var catEl=g('txC'),cat=isExp&&catEl?catEl.value:null;
+    var catEl=g('txC'),catVal=isExp&&catEl?catEl.value:'';
     if(!desc||isNaN(amt)||amt<=0)return;
-    if(isExp&&!cat){alert('Please select a category.');return;}
+    if(isExp&&!catVal){alert('Please select a category.');return;}
     var fa=isExp?-Math.abs(amt):Math.abs(amt);
-    var t={id:uid(),desc,amt:fa,date,account:acct};if(cat)t.cat=cat;
+    var t={id:uid(),desc,amt:fa,date,account:acct};
+    if(catVal.startsWith('bill:')){
+      var billId=catVal.replace('bill:','');
+      var bill=S.bills.find(b=>b.id===billId);
+      if(bill){
+        t.isBillPayment=true;t.billId=billId;
+        var key=merchantKey(desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__bill:'+billId};
+        if(date>=bill.nextDue)S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+      }
+    }else if(catVal.startsWith('cat:')){
+      var catId=catVal.replace('cat:','');
+      t.cat=catId;
+      var key2=merchantKey(desc);if(key2)S.merchantMemory={...S.merchantMemory,[key2]:catId};
+    }
     S.txns=[t].concat(S.txns);
     adjAcct(acct,fa);
-    S.txForm=false;S.txType='expense';S.txAcct='chime';save();render();
+    S.txForm=false;S.txType='expense';S.txAcct='chime';S.pendingBillLog=null;save();render();
   };
-  var txX=g('txX');if(txX)txX.onclick=()=>{S.txForm=false;S.txType='expense';S.txAcct='chime';render()};
+  var txX=g('txX');if(txX)txX.onclick=()=>{S.txForm=false;S.txType='expense';S.txAcct='chime';S.pendingBillLog=null;render()};
   document.querySelectorAll('[data-fc]').forEach(el=>el.onclick=()=>{S.filt=el.dataset.fc;render()});
   document.querySelectorAll('[data-fa]').forEach(el=>el.onclick=()=>{S.filtAcct=el.dataset.fa;render()});
   var ffrom=g('filt-from');if(ffrom)ffrom.onchange=()=>{S.filtFrom=ffrom.value;render()};
