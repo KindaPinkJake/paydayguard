@@ -67,7 +67,7 @@ var S={
   dismissedDupes:[],
   bulkCat:false,
   bulkDupes:false,
-  reconcileView:false,reconcileData:null,reconcileParsing:false
+  reconcileView:false,reconcileData:null,reconcileParsing:false,reconcileFiles:[]
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -1105,53 +1105,86 @@ function reconcileStatementTxns(stmtTxns){
 
 function parseChimeStatementText(text){
   var txns=[];
-  var EXCLUDE=['Moved from Secured Deposit Account','Moved to Secured Deposit Account'];
-  // Match: date · description · type keyword · amount · net amount · settlement date
-  var re=/(\d{1,2}\/\d{1,2}\/\d{4})\s+([\s\S]*?)\s+(Round Up Transfer|Direct Debit|Transfer|Purchase|Deposit)\s+(-?\$[\d,]+\.\d{2})\s+-?\$[\d,]+\.\d{2}\s+\d{1,2}\/\d{1,2}\/\d{4}/g;
-  var m;
-  while((m=re.exec(text))!==null){
-    var rawDesc=m[2].replace(/\s+/g,' ').trim();
-    if(EXCLUDE.some(ex=>rawDesc.includes(ex)))continue;
-    var dp=m[1].split('/');
-    var isoDate=dp[2]+'-'+dp[0].padStart(2,'0')+'-'+dp[1].padStart(2,'0');
-    var amt=parseFloat(m[4].replace(/[$,]/g,''));
-    txns.push({date:isoDate,description:rawDesc,amount:amt});
+  var EXCLUDE=['Moved from Secured Deposit Account','Moved to Secured Deposit Account',
+    'Moved from Checking Account','Moved to Checking Account',
+    'Transfer from Savings Account','Transfer from SpotMe',
+    'Payment to SpotMe','Card Payment from Secured','Chime Card Payment',
+    'Cash Back For General Shopping'];
+
+  // Detect format: combined statement has "ACCOUNT" column header
+  var isCombined=text.includes('AMOUNT ACCOUNT SETTLEMENT DATE')||text.includes('AMOUNT\tACCOUNT\tSETTLEMENT');
+
+  if(isCombined){
+    // Combined format: DATE DESCRIPTION TYPE AMOUNT ACCOUNT SETTLEMENT_DATE
+    var re=/(\d{1,2}\/\d{1,2}\/\d{4})\s+([\s\S]*?)\s+(Round Up Transfer|Direct Debit|Transfer|Purchase|Deposit|Refund|Payment)\s+(-?\$[\d,]+\.\d{2})\s+(Checking|Chime Card|Secured Deposit Account)\s+\d{1,2}\/\d{1,2}\/\d{4}/g;
+    var m;
+    while((m=re.exec(text))!==null){
+      if(m[5]==='Secured Deposit Account')continue; // skip internal float account only
+      var rawDesc=m[2].replace(/\s+/g,' ').trim();
+      if(EXCLUDE.some(ex=>rawDesc.toLowerCase().includes(ex.toLowerCase())))continue;
+      var dp=m[1].split('/');
+      var isoDate=dp[2]+'-'+dp[0].padStart(2,'0')+'-'+dp[1].padStart(2,'0');
+      var amt=parseFloat(m[4].replace(/[$,]/g,''));
+      txns.push({date:isoDate,description:rawDesc,amount:amt});
+    }
+  } else {
+    // Checking-only format: DATE DESCRIPTION TYPE AMOUNT NET_AMOUNT SETTLEMENT_DATE
+    var re2=/(\d{1,2}\/\d{1,2}\/\d{4})\s+([\s\S]*?)\s+(Round Up Transfer|Direct Debit|Transfer|Purchase|Deposit)\s+(-?\$[\d,]+\.\d{2})\s+-?\$[\d,]+\.\d{2}\s+\d{1,2}\/\d{1,2}\/\d{4}/g;
+    var m2;
+    while((m2=re2.exec(text))!==null){
+      var rawDesc2=m2[2].replace(/\s+/g,' ').trim();
+      if(EXCLUDE.some(ex=>rawDesc2.toLowerCase().includes(ex.toLowerCase())))continue;
+      var dp2=m2[1].split('/');
+      var isoDate2=dp2[2]+'-'+dp2[0].padStart(2,'0')+'-'+dp2[1].padStart(2,'0');
+      var amt2=parseFloat(m2[4].replace(/[$,]/g,''));
+      txns.push({date:isoDate2,description:rawDesc2,amount:amt2});
+    }
   }
   return txns;
 }
 
-async function parseStatementPDF(base64){
-  S.reconcileParsing=true;S.reconcileData=null;render();
+async function parsePDFToText(base64){
+  if(!window.pdfjsLib){
+    await new Promise((resolve,reject)=>{
+      var s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload=resolve;s.onerror=reject;document.head.appendChild(s);
+    });
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  var binary=atob(base64),bytes=new Uint8Array(binary.length);
+  for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  var pdf=await pdfjsLib.getDocument({data:bytes}).promise;
+  var lineMap=new Map();
+  for(var p=1;p<=pdf.numPages;p++){
+    var page=await pdf.getPage(p);
+    var content=await page.getTextContent();
+    content.items.forEach(item=>{
+      if(!item.str.trim())return;
+      var y=Math.round(item.transform[5]);
+      if(!lineMap.has(y))lineMap.set(y,[]);
+      lineMap.get(y).push(item.str);
+    });
+  }
+  return Array.from(lineMap.keys()).sort((a,b)=>b-a).map(y=>lineMap.get(y).join(' ')).join('\n');
+}
+
+async function parseStatementPDF(files){
+  S.reconcileParsing=true;S.reconcileData=null;S.reconcileFiles=files.map(f=>({name:f.name,status:'pending'}));render();
   try{
-    // Load PDF.js on demand
-    if(!window.pdfjsLib){
-      await new Promise((resolve,reject)=>{
-        var s=document.createElement('script');
-        s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-        s.onload=resolve;s.onerror=reject;document.head.appendChild(s);
-      });
-      pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    var allStmtTxns=[];
+    for(var i=0;i<files.length;i++){
+      S.reconcileFiles[i].status='parsing';render();
+      var base64=await new Promise((res,rej)=>{var r=new FileReader();r.onload=e=>res(e.target.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(files[i]);});
+      var text=await parsePDFToText(base64);
+      var txns=parseChimeStatementText(text);
+      S.reconcileFiles[i].status=txns.length?'done':'error';
+      S.reconcileFiles[i].count=txns.length;
+      allStmtTxns=allStmtTxns.concat(txns);
+      render();
     }
-    // Decode base64 to bytes
-    var binary=atob(base64),bytes=new Uint8Array(binary.length);
-    for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
-    // Extract text grouped by y-position to reconstruct lines
-    var pdf=await pdfjsLib.getDocument({data:bytes}).promise;
-    var lineMap=new Map();
-    for(var p=1;p<=pdf.numPages;p++){
-      var page=await pdf.getPage(p);
-      var content=await page.getTextContent();
-      content.items.forEach(item=>{
-        if(!item.str.trim())return;
-        var y=Math.round(item.transform[5]);
-        if(!lineMap.has(y))lineMap.set(y,[]);
-        lineMap.get(y).push(item.str);
-      });
-    }
-    var fullText=Array.from(lineMap.keys()).sort((a,b)=>b-a).map(y=>lineMap.get(y).join(' ')).join('\n');
-    var stmtTxns=parseChimeStatementText(fullText);
-    if(!stmtTxns.length)throw new Error('No transactions found — is this a Chime checking statement?');
-    S.reconcileData=reconcileStatementTxns(stmtTxns);
+    if(!allStmtTxns.length)throw new Error('No transactions found in any statement — are these Chime checking statements?');
+    S.reconcileData=reconcileStatementTxns(allStmtTxns);
   }catch(e){
     console.error('Reconcile error',e);
     S.reconcileData={error:e.message||'Parse failed'};
@@ -1161,18 +1194,27 @@ async function parseStatementPDF(base64){
 
 function reconcileViewHtml(){
   if(S.reconcileParsing){
-    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px"><h2 style="font-size:18px;font-weight:600">Reconcile Statement</h2></div><div style="text-align:center;padding:48px 0"><p style="font-size:32px;margin-bottom:12px">📄</p><p style="font-size:14px;color:var(--tx2)">Analyzing statement...</p></div></div>`;
+    var files=S.reconcileFiles||[];
+    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px"><h2 style="font-size:18px;font-weight:600">Reconcile Statements</h2></div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+    ${files.map(f=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+      <p style="font-size:13px">${f.name}</p>
+      <p style="font-size:12px;color:${f.status==='done'?'var(--tx-ok)':f.status==='error'?'var(--tx-err)':'var(--tx2)'}">${f.status==='done'?'✓ '+f.count+' txns':f.status==='error'?'✗ no transactions':f.status==='parsing'?'Parsing…':'Waiting…'}</p>
+    </div>`).join('')}
+    </div></div>`;
   }
   if(S.reconcileData&&S.reconcileData.error){
-    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-size:18px;font-weight:600">Reconcile Statement</h2><button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Back</button></div><div style="background:var(--bg-err);border:1px solid var(--bd-err);border-radius:12px;padding:16px"><p style="color:var(--tx-err)">Error: ${S.reconcileData.error}</p></div></div>`;
+    return`<div style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-size:18px;font-weight:600">Reconcile Statements</h2><button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Back</button></div><div style="background:var(--bg-err);border:1px solid var(--bd-err);border-radius:12px;padding:16px"><p style="color:var(--tx-err)">Error: ${S.reconcileData.error}</p></div></div>`;
   }
   if(S.reconcileData){
     var d=S.reconcileData;
+    var files=S.reconcileFiles||[];
     return`<div style="padding:16px 16px 0">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div><h2 style="font-size:18px;font-weight:600">Reconcile Results</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${fd(d.periodStart)} – ${fd(d.periodEnd)}</p></div>
+      <div><h2 style="font-size:18px;font-weight:600">Reconcile Results</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${fd(d.periodStart)} – ${fd(d.periodEnd)} · ${files.length} statement${files.length!==1?'s':''}</p></div>
       <div style="display:flex;gap:6px">
         ${d.dupes&&d.dupes.length?`<button class="btn" id="rec-delete-all-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Delete all (${d.dupes.length})</button>`:''}
+        <button class="btn" id="rec-upload-more-btn" style="font-size:13px;padding:6px 12px">+ Add more</button>
         <button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Done</button>
       </div>
     </div>
@@ -1187,20 +1229,21 @@ function reconcileViewHtml(){
       <div><p style="font-size:13px;font-weight:500">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}</p></div>
       <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(t.amt)}</p><button class="btn" data-rec-del="${t.id}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
     </div>`).join('')}
-    </div>`:'<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:24px;text-align:center;margin-bottom:16px"><p style="font-size:24px;margin-bottom:8px">🎉</p><p style="font-size:14px;color:var(--tx-ok)">All transactions match the statement — no dupes found!</p></div>'}
+    </div>`:'<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:24px;text-align:center;margin-bottom:16px"><p style="font-size:24px;margin-bottom:8px">🎉</p><p style="font-size:14px;color:var(--tx-ok)">All transactions match — no dupes found!</p></div>'}
+    <input type="file" id="rec-pdf-input" accept=".pdf" multiple style="display:none">
     </div>`;
   }
   // Upload state
   return`<div style="padding:16px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="font-size:18px;font-weight:600">Reconcile Statement</h2>
+    <h2 style="font-size:18px;font-weight:600">Reconcile Statements</h2>
     <button class="btn" id="rec-back-btn" style="font-size:13px;padding:6px 14px">Back</button>
   </div>
   <div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:20px">
-    <p style="font-size:14px;font-weight:500;margin-bottom:6px">Upload a Chime PDF statement</p>
-    <p style="font-size:12px;color:var(--tx2);margin-bottom:16px">Claude will parse the statement and find any Teller transactions that don't appear in it — those are confirmed duplicates you can delete.</p>
-    <input type="file" id="rec-pdf-input" accept=".pdf" style="display:none">
-    <button class="btn" id="rec-upload-btn" style="width:100%;font-weight:500;color:var(--tx-info);border-color:var(--bd)">📄 Choose PDF statement</button>
+    <p style="font-size:14px;font-weight:500;margin-bottom:6px">Upload Chime PDF statements</p>
+    <p style="font-size:12px;color:var(--tx2);margin-bottom:16px">Select one or more monthly statements. Any Teller transactions that don't appear in the statements are confirmed duplicates.</p>
+    <input type="file" id="rec-pdf-input" accept=".pdf" multiple style="display:none">
+    <button class="btn" id="rec-upload-btn" style="width:100%;font-weight:500;color:var(--tx-info);border-color:var(--bd)">📄 Choose PDF statements</button>
   </div>
   </div>`;
 }
@@ -1379,7 +1422,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkDupes=false;S.reconcileView=false;S.reconcileData=null;S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkDupes=false;S.reconcileView=false;S.reconcileData=null;S.reconcileFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1597,14 +1640,13 @@ function bind(){
   var cc=g('catCancel');if(cc)cc.onclick=()=>{S.catForm=false;S.editCat=null;render()};
 
   function ttf(){S.txForm=!S.txForm;render()}
-  var reconcileBtn=g('reconcile-btn');if(reconcileBtn)reconcileBtn.onclick=()=>{S.reconcileView=true;S.reconcileData=null;render()};
-  var recBackBtn=g('rec-back-btn');if(recBackBtn)recBackBtn.onclick=()=>{S.reconcileView=false;S.reconcileData=null;render()};
+  var reconcileBtn=g('reconcile-btn');if(reconcileBtn)reconcileBtn.onclick=()=>{S.reconcileView=true;S.reconcileData=null;S.reconcileFiles=[];render()};
+  var recBackBtn=g('rec-back-btn');if(recBackBtn)recBackBtn.onclick=()=>{S.reconcileView=false;S.reconcileData=null;S.reconcileFiles=[];render()};
   var recUploadBtn=g('rec-upload-btn');if(recUploadBtn)recUploadBtn.onclick=()=>g('rec-pdf-input').click();
+  var recUploadMoreBtn=g('rec-upload-more-btn');if(recUploadMoreBtn)recUploadMoreBtn.onclick=()=>g('rec-pdf-input').click();
   var recPdfInput=g('rec-pdf-input');if(recPdfInput)recPdfInput.onchange=e=>{
-    var file=e.target.files[0];if(!file)return;
-    var reader=new FileReader();
-    reader.onload=ev=>{var b64=ev.target.result.split(',')[1];parseStatementPDF(b64);};
-    reader.readAsDataURL(file);
+    var files=Array.from(e.target.files);if(!files.length)return;
+    parseStatementPDF(files);
   };
   var recDeleteAll=g('rec-delete-all-btn');if(recDeleteAll)recDeleteAll.onclick=()=>{
     if(!S.reconcileData||!S.reconcileData.dupes||!S.reconcileData.dupes.length)return;
@@ -1780,7 +1822,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[],bulkCat:false,bulkDupes:false,reconcileView:false,reconcileData:null,reconcileParsing:false});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[],bulkCat:false,bulkDupes:false,reconcileView:false,reconcileData:null,reconcileParsing:false,reconcileFiles:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
