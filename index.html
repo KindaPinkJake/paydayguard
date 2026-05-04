@@ -61,7 +61,7 @@ var S={
   filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
   shareToken:null,showSharePanel:false,
   tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,
-  billAssignTxId:null,editTx:null,
+  billAssignTxId:null,loanAssignTxId:null,editTx:null,
   goalForm:false,editGoal:null,
   merchantMemory:{},
   dismissedDupes:[],
@@ -254,7 +254,22 @@ async function tellerSync(){
     if(S.tellerSavingsAccountId){
       var savBalRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerSavingsAccountId})});
       var savBalData=await savBalRes.json();
-      if(savBalData.balance){S.chimeSavingsBal=Math.round((parseFloat(savBalData.balance.available||savBalData.balance.ledger||0))*100)/100;}
+      if(savBalData.balance){
+        S.chimeSavingsBal=Math.round((parseFloat(savBalData.balance.available||savBalData.balance.ledger||0))*100)/100;
+        // Auto-allocate any unallocated amount (round-ups, auto-savings) to goals by budgetPct
+        var totalAlloc=S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
+        var unalloc=Math.round((S.chimeSavingsBal-totalAlloc)*100)/100;
+        if(unalloc>0.01&&S.savingsGoals.some(g=>g.budgetPct>0)){
+          var totalGoalPct=S.savingsGoals.reduce((s,g)=>s+(g.budgetPct||0),0);
+          if(totalGoalPct>0){
+            S.savingsGoals=S.savingsGoals.map(g=>{
+              if(!g.budgetPct)return g;
+              var share=Math.round(unalloc*(g.budgetPct/totalGoalPct)*100)/100;
+              return{...g,allocated:Math.round((g.allocated+share)*100)/100};
+            });
+          }
+        }
+      }
     }
 
     // Fetch checking transactions (500 most recent)
@@ -304,12 +319,12 @@ async function tellerSync(){
           if(remembered&&remembered.startsWith('__bill:')){
             var billId=remembered.replace('__bill:','');
             var bill=S.bills.find(b=>b.id===billId);
-            if(bill){
-              tx.suggestedBillId=billId;
-            }else{
-              var suggested=suggestCategory(desc);
-              if(suggested)tx.suggestedCat=suggested;
-            }
+            if(bill){tx.suggestedBillId=billId;}
+            else{var suggested=suggestCategory(desc);if(suggested)tx.suggestedCat=suggested;}
+          }else if(remembered&&remembered.startsWith('__loan:')){
+            var loanId=remembered.replace('__loan:','');
+            if(S.loans.find(l=>l.id===loanId))tx.suggestedLoanId=loanId;
+            else{var suggested=suggestCategory(desc);if(suggested)tx.suggestedCat=suggested;}
           }else if(remembered&&gc().find(c=>c.id===remembered)){
             tx.suggestedCat=remembered;
           }else{
@@ -621,7 +636,7 @@ function isSavingsTransfer(desc){
 }
 
 function firstUncategorized(){
-  return S.txns.find(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings')||null;
+  return S.txns.find(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings')||null;
 }
 function banners(){
   var h='';
@@ -632,7 +647,7 @@ function banners(){
   var unc=firstUncategorized();
   if(unc){
     var cats=gc();
-    var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings').length;
+    var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings').length;
     var suggested=unc.suggestedCat||null;
     h+=`<div style="background:var(--bg);border:1px solid var(--bd2);border-radius:12px;padding:14px 16px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -646,8 +661,12 @@ function banners(){
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         ${cats.map(c=>{var cl=co(c.color);var isSuggested=c.id===suggested;return`<button data-cat-assign="${unc.id}" data-cat-val="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:${isSuggested?'2px solid '+cl.c:'1px solid '+cl.c};background:${isSuggested?cl.c:cl.bg};color:${isSuggested?'var(--bg)':cl.c};font-weight:${isSuggested?'600':'400'}">${isSuggested?'✓ ':''} ${c.label}</button>`}).join('')}
       </div>
-      <button data-cat-bill="${unc.id}" class="btn" style="width:100%;font-size:12px;padding:6px;color:var(--tx-warn);border-color:var(--bd-warn)">Mark as bill payment →</button>
-      ${(S.billAssignTxId===unc.id||unc.suggestedBillId)&&S.bills.length?`<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedBillId?'Looks like this bill:':'Which bill is this?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>{var isSug=b.id===unc.suggestedBillId;return`<button data-bill-assign="${unc.id}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-ok);background:var(--bg-ok);':''}"><span>${isSug?'✓ ':''} ${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`;}).join('')}</div></div>`:''}
+      <div style="display:flex;gap:6px;margin-bottom:${(S.billAssignTxId===unc.id||unc.suggestedBillId||S.loanAssignTxId===unc.id||unc.suggestedLoanId)?'8':'0'}px">
+        <button data-cat-bill="${unc.id}" class="btn" style="flex:1;font-size:12px;padding:6px;color:var(--tx-warn);border-color:var(--bd-warn)">Bill payment →</button>
+        ${S.loans.length?`<button data-cat-loan="${unc.id}" class="btn" style="flex:1;font-size:12px;padding:6px;color:var(--tx-info);border-color:var(--bd)">Loan payment →</button>`:''}
+      </div>
+      ${(S.billAssignTxId===unc.id||unc.suggestedBillId)&&S.bills.length?`<div style="margin-top:4px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedBillId?'Looks like this bill:':'Which bill is this?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>{var isSug=b.id===unc.suggestedBillId;return`<button data-bill-assign="${unc.id}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-ok);background:var(--bg-ok);':''}"><span>${isSug?'✓ ':''} ${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`;}).join('')}</div></div>`:''}
+      ${(S.loanAssignTxId===unc.id||unc.suggestedLoanId)&&S.loans.length?`<div style="margin-top:4px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedLoanId?'Looks like this loan:':'Which loan is this for?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.loans.map(l=>{var isSug=l.id===unc.suggestedLoanId;return`<button data-loan-assign="${unc.id}" data-loan-id="${l.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-info);background:var(--bg-info);':''}"><span>${isSug?'✓ ':''} ${l.name}</span><span class="mono" style="color:var(--tx-err)">${fm(l.bal)} remaining</span></button>`;}).join('')}</div></div>`:''}
     </div>`;
   }
   return h;
@@ -1170,7 +1189,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1199,7 +1218,23 @@ function bind(){
     S.billAssignTxId=null;save();render();
   });
   document.querySelectorAll('[data-cat-bill]').forEach(el=>el.onclick=()=>{
-    S.billAssignTxId=S.billAssignTxId===el.dataset.catBill?null:el.dataset.catBill;render();
+    S.billAssignTxId=S.billAssignTxId===el.dataset.catBill?null:el.dataset.catBill;
+    S.loanAssignTxId=null;render();
+  });
+  document.querySelectorAll('[data-cat-loan]').forEach(el=>el.onclick=()=>{
+    S.loanAssignTxId=S.loanAssignTxId===el.dataset.catLoan?null:el.dataset.catLoan;
+    S.billAssignTxId=null;render();
+  });
+  document.querySelectorAll('[data-loan-assign]').forEach(el=>el.onclick=()=>{
+    var txId=el.dataset.loanAssign,loanId=el.dataset.loanId;
+    var loan=S.loans.find(l=>l.id===loanId);
+    if(!loan)return;
+    var tx=S.txns.find(t=>t.id===txId);
+    if(tx&&tx.desc){var key=merchantKey(tx.desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__loan:'+loanId};}
+    var payment=Math.abs(tx?tx.amt:0);
+    S.loans=S.loans.map(l=>l.id===loanId?{...l,bal:Math.max(0,Math.round((l.bal-payment)*100)/100)}:l);
+    S.txns=S.txns.map(t=>t.id===txId?{...t,desc:loan.name+' payment',isLoanPayment:true,loanId,suggestedLoanId:undefined}:t);
+    S.loanAssignTxId=null;save();render();
   });
   document.querySelectorAll('[data-bill-assign]').forEach(el=>el.onclick=()=>{
     var txId=el.dataset.billAssign,billId=el.dataset.billId;
@@ -1459,6 +1494,9 @@ function bind(){
       var goalNameWd=t.desc.replace('Transfer from savings \u2014 ','').replace('Transfer from savings','').trim();
       if(goalNameWd)S.savingsGoals=S.savingsGoals.map(g=>g.name===goalNameWd?{...g,allocated:Math.round((g.allocated+Math.abs(t.amt))*100)/100}:g);
     }
+    if(t.isLoanPayment&&t.loanId){
+      S.loans=S.loans.map(l=>l.id===t.loanId?{...l,bal:Math.round((l.bal+Math.abs(t.amt))*100)/100}:l);
+    }
     S.txns=S.txns.filter(x=>x.id!==el.dataset.dt);
     save();render();
   });
@@ -1484,7 +1522,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
