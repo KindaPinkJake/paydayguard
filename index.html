@@ -242,7 +242,7 @@ async function tellerSync(){
       // Only import transactions we haven't seen before (by Teller ID)
       // Also catch pending→posted duplicates from same batch and existing storage
       var seenBatch=new Map();
-      var newTxns=txData.transactions.filter(t=>{
+      var newTxns=txData.transactions.filter(t=>t.status==='posted').filter(t=>{
         if(existing.has(t.id))return false;
         var amt=parseFloat(t.amount||0);
         var desc=(t.description||'').trim();
@@ -324,7 +324,7 @@ async function tellerSync(){
       if(savTxData.transactions&&savTxData.transactions.length){
         var existingSav=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
         var seenSavBatch=new Map();
-        var newSavTxns=savTxData.transactions.filter(t=>{
+        var newSavTxns=savTxData.transactions.filter(t=>t.status==='posted').filter(t=>{
           if(existingSav.has(t.id))return false;
           var amt=parseFloat(t.amount||0);
           var desc=(t.description||'').trim();
