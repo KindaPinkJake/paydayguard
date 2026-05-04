@@ -579,21 +579,15 @@ function allSuspectedDupes(){
 }
 
 function dupeConfidence(a,b){
-  // If both have running balances, check if the balance actually dropped twice
   if(a.runningBal==null||b.runningBal==null)return null;
-  // Sort by date to get chronological order
   var first=a.date<=b.date?a:b;
   var second=a.date<=b.date?b:a;
-  // Find the transaction just before 'first' to get the baseline balance
-  var expenses=S.txns.filter(t=>t.runningBal!=null&&t.account==='chime'&&t.date<=first.date&&t.id!==first.id&&t.id!==second.id);
-  if(!expenses.length)return null;
-  var prev=expenses.sort((x,y)=>y.date.localeCompare(x.date)||0)[0];
-  // If second.runningBal ≈ first.runningBal, the balance didn't actually drop — strong dupe signal
+  // second.runningBal vs first.runningBal tells us if the balance actually dropped
   var balDiff=Math.abs(second.runningBal-first.runningBal);
   var expectedDrop=Math.abs(second.amt);
-  if(balDiff<0.02)return'confirmed'; // balance didn't move at all — almost certainly dupe
-  if(Math.abs(balDiff-expectedDrop)<0.02)return'real'; // balance dropped by exactly the amount — real charge
-  return null; // inconclusive
+  if(balDiff<0.02)return'confirmed'; // balance didn't move — almost certainly a dupe
+  if(Math.abs(balDiff-expectedDrop)<0.02)return'real'; // balance dropped exactly — real charge
+  return null;
 }
 
 function firstSuspectedDupe(){
@@ -679,7 +673,7 @@ function banners(){
       <p style="font-size:13px;font-weight:600;color:var(--tx-warn)">⚠ Possible duplicate charge</p>
       ${(()=>{var total=allSuspectedDupes().length;return total>1?`<span style="font-size:11px;color:var(--tx-warn);background:var(--bg-warn);padding:3px 8px;border-radius:6px">${total} pairs</span>`:'';})()} 
     </div>
-    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">${(()=>{var conf=dupeConfidence(dupe.a,dupe.b);return conf==='confirmed'?'<span style="color:var(--tx-err);font-weight:500">⚠ Balance didn\'t drop twice — likely a duplicate</span>':conf==='real'?'<span style="color:var(--tx-ok)">✓ Balance dropped for both — both appear real</span>':'Same merchant, '+Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))+' day(s) apart — is one a duplicate?';})()}</p>
+    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">${(()=>{var conf=dupeConfidence(dupe.a,dupe.b);return conf==='confirmed'?'<span style="color:var(--tx-err);font-weight:500">⚠ Balance didn\'t drop twice — likely a duplicate</span>':conf==='real'?'<span style="color:var(--tx-ok)">✓ Balance dropped for both — both appear real</span>':dupe.a.runningBal==null?'Same merchant, '+Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))+' day(s) apart — Reset to get balance data':'<span style="color:var(--tx2)">Balance inconclusive — same merchant, '+Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))+' day(s) apart</span>';})()}</p>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
       <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
         <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
