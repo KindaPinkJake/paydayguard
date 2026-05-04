@@ -249,9 +249,11 @@ async function tellerSync(){
   S.tellerSyncing=true;render();
   try{
     // Log all available accounts so we can see what Teller returns
-    var acctRes=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken})});
-    var acctData=await acctRes.json();
-    console.log('TELLER ACCOUNTS:',JSON.stringify(acctData.accounts||acctData,null,2));
+    try{
+      var acctRes=await fetch(FUNCTIONS_BASE+'/getAccounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken})});
+      var acctRaw=await acctRes.text();
+      console.log('TELLER ACCOUNTS RAW (status '+acctRes.status+'):', acctRaw);
+    }catch(ae){console.log('TELLER ACCOUNTS ERROR:',ae.message);}
     // Sync checking balance
     var balRes=await fetch(FUNCTIONS_BASE+'/getBalance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:S.tellerToken,accountId:S.tellerAccountId})});
     var balData=await balRes.json();
@@ -454,6 +456,7 @@ function bcard(title,bid,val){
   var syncBtn=tellerConnected
     ?`<div style="display:flex;gap:6px;flex:1">
         <button class="btn" id="chime-sync" style="font-size:12px;padding:5px 10px;flex:1;${S.tellerSyncing?'opacity:.5':''}">${S.tellerSyncing?'Syncing...':'↻ Sync'}</button>
+        <button class="btn" id="chime-relink-token" style="font-size:11px;padding:5px 8px;color:var(--tx-info);border-color:var(--bd)">Re-link</button>
         ${!S.tellerSavingsAccountId?`<button class="btn" id="chime-relink" style="font-size:11px;padding:5px 8px;color:var(--tx-info);border-color:var(--bd)">Link Savings</button>`:''}
       </div>`
     :(isChime?`<button class="btn" id="chime-connect" style="font-size:12px;padding:5px 10px;flex:1;color:var(--tx-info);border-color:var(--bd)">Link Chime</button>`:'');
