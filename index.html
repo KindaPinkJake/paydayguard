@@ -434,7 +434,6 @@ function safe(){return S.bal-upcoming().reduce((s,b)=>s+b.amt,0)}
 function days(){var pd=getPayday();if(!pd)return null;var now=new Date();now.setHours(0,0,0,0);return Math.ceil((new Date(pd+'T00:00:00')-now)/86400000)}
 function showLevel(v){if(!getPayday())return'safe';return v<20?'danger':v<100?'warning':'safe'}
 function ls(l){return{danger:{c:'var(--tx-err)',bg:'var(--bg-err)',br:'var(--bd-err)'},warning:{c:'var(--tx-warn)',bg:'var(--bg-warn)',br:'var(--bd-warn)'},safe:{c:'var(--tx-ok)',bg:'var(--bg-ok)',br:'var(--bd-ok)'}}[l]}
-function billsToday(){return[]} // Bills handled via Teller transaction categorization
 function pcsToday(){
   if(S.tellerToken&&S.tellerAccountId)return[]; // Teller handles paycheck detection automatically
   var t=tod();return S.paychecks.filter(p=>p.nextDate===t&&!S.disPcs.includes(p.id));
@@ -659,7 +658,7 @@ function banners(){
     h+=`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px;margin-bottom:10px">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
       <p style="font-size:13px;font-weight:600;color:var(--tx-warn)">⚠ Possible duplicate charge</p>
-      ${(()=>{var total=0;var seen=new Set();S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings').forEach(a=>{var aW=(a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');if(!aW||aW.length<3)return;S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings').forEach(b=>{if(b.id===a.id)return;var bW=(b.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');if(aW!==bW)return;if(Math.abs(a.amt-b.amt)<0.01)return;var diff=Math.abs((new Date(a.date+'T00:00:00')-new Date(b.date+'T00:00:00'))/86400000);if(diff>3)return;var pk=[a.id,b.id].sort().join('|');if(S.dismissedDupes.includes(pk))return;if(!seen.has(pk)){seen.add(pk);total++;}});});return total>1?`<span style="font-size:11px;color:var(--tx-warn);background:var(--bg-warn);padding:3px 8px;border-radius:6px">${total} pairs</span>`:''})()}
+      ${(()=>{var total=allSuspectedDupes().length;return total>1?`<span style="font-size:11px;color:var(--tx-warn);background:var(--bg-warn);padding:3px 8px;border-radius:6px">${total} pairs</span>`:'';})()} 
     </div>
     <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Same merchant, ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart — is one a duplicate?</p>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
@@ -1119,8 +1118,8 @@ function historyView(){
         }).join('')}
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn" data-del-dupe-group="${grp.pairs.map(d=>d.a.id+'~'+d.b.id+'~'+d.pairKey).join('|')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx-err);border-color:var(--bd-err)">Delete duplicates (${grp.pairs.length})</button>
-        <button class="btn" data-dismiss-dupe-group="${grp.pairs.map(d=>d.pairKey).join('|')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx2)">Keep all</button>
+        <button class="btn" data-del-dupe-group="${grp.pairs.map(d=>d.a.id+'~~~'+d.b.id).join('||||')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx-err);border-color:var(--bd-err)">Delete duplicates (${grp.pairs.length})</button>
+        <button class="btn" data-dismiss-dupe-group="${grp.pairs.map(d=>d.a.id+'~~~'+d.b.id).join('||||')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx2)">Keep all</button>
       </div>
     </div>`).join('')}
     </div></div>`;
@@ -1139,7 +1138,7 @@ function historyView(){
     var groupArr=Array.from(groups.values()).filter(g=>g.txns.length>=2).sort((a,b)=>b.txns.length-a.txns.length);
     return`<div style="padding:16px 16px 0">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div><h2 style="font-size:18px;font-weight:600">Bulk Categorize</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${groupArr.length} groups · ${uncat.length} transactions</p></div>
+      <div><h2 style="font-size:18px;font-weight:600">Bulk Categorize</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${groupArr.length} groups · ${groupArr.reduce((s,g)=>s+g.txns.length,0)} transactions</p></div>
       <button class="btn" id="bulk-done-btn" style="font-size:13px;padding:6px 14px">Done</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:10px">
@@ -1149,8 +1148,8 @@ function historyView(){
         <div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err)">${fm(grp.amt)}</p><p style="font-size:11px;color:var(--tx2)">${grp.txns.length}×</p></div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
-        ${cats.map(c=>{var cl=co(c.color);return`<button data-bulk-assign data-merchant="${grp.merchant}" data-amt="${grp.amt}" data-cat="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label} (${grp.txns.length})</button>`}).join('')}
-        <button data-bulk-bill data-merchant="${grp.merchant}" data-amt="${grp.amt}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid var(--bd-warn);background:var(--bg-warn);color:var(--tx-warn)">Bill payment</button>
+        ${cats.map(c=>{var cl=co(c.color);return`<button data-bulk-assign data-mkey="${merchantKey(grp.merchant)}" data-amt="${grp.amt}" data-cat="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label} (${grp.txns.length})</button>`}).join('')}
+        <button data-bulk-bill data-mkey="${merchantKey(grp.merchant)}" data-amt="${grp.amt}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid var(--bd-warn);background:var(--bg-warn);color:var(--tx-warn)">Bill payment</button>
       </div>
     </div>`).join('')}
     ${groupArr.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">All caught up! 🎉</p>':''}
@@ -1465,11 +1464,11 @@ function bind(){
   function ttf(){S.txForm=!S.txForm;render()}
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
   document.querySelectorAll('[data-del-dupe-group]').forEach(el=>el.onclick=()=>{
-    var entries=el.dataset.delDupeGroup.split('|');
+    var entries=el.dataset.delDupeGroup.split('||||');
     entries.forEach(entry=>{
-      var parts=entry.split('~');
-      var aId=parts[0],bId=parts[1],pairKey=parts[2];
-      // Keep older, delete newer
+      var parts=entry.split('~~~');
+      var aId=parts[0],bId=parts[1];
+      var pairKey=[aId,bId].sort().join('|');
       var txA=S.txns.find(t=>t.id===aId),txB=S.txns.find(t=>t.id===bId);
       if(!txA||!txB)return;
       var toDelete=txA.date>=txB.date?txA:txB;
@@ -1482,7 +1481,8 @@ function bind(){
     save();render();
   });
   document.querySelectorAll('[data-dismiss-dupe-group]').forEach(el=>el.onclick=()=>{
-    var pairKeys=el.dataset.dismissDupeGroup.split('|');
+    var entries=el.dataset.dismissDupeGroup.split('||||');
+    var pairKeys=entries.map(e=>{var p=e.split('~~~');return[p[0],p[1]].sort().join('|');});
     S.dismissedDupes=[...S.dismissedDupes,...pairKeys];
     save();render();
   });
@@ -1508,19 +1508,17 @@ function bind(){
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
   document.querySelectorAll('[data-bulk-assign]').forEach(el=>el.onclick=()=>{
-    var merchant=el.dataset.merchant,amt=parseFloat(el.dataset.amt),catId=el.dataset.cat;
-    var key=merchantKey(merchant);
-    if(key)S.merchantMemory={...S.merchantMemory,[key]:catId};
+    var mkey=el.dataset.mkey,amt=parseFloat(el.dataset.amt),catId=el.dataset.cat;
+    if(mkey)S.merchantMemory={...S.merchantMemory,[mkey]:catId};
     S.txns=S.txns.map(t=>{
-      if(merchantKey(t.desc)===key&&t.amt===amt&&!t.cat&&!t.isBillPayment)return{...t,cat:catId};
+      if(merchantKey(t.desc)===mkey&&t.amt===amt&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment)return{...t,cat:catId};
       return t;
     });
     save();render();
   });
   document.querySelectorAll('[data-bulk-bill]').forEach(el=>el.onclick=()=>{
-    var merchant=el.dataset.merchant,amt=parseFloat(el.dataset.amt);
-    var key=merchantKey(merchant);
-    var firstMatch=S.txns.find(t=>merchantKey(t.desc)===key&&t.amt===amt&&!t.isBillPayment);
+    var mkey=el.dataset.mkey,amt=parseFloat(el.dataset.amt);
+    var firstMatch=S.txns.find(t=>merchantKey(t.desc)===mkey&&t.amt===amt&&!t.isBillPayment);
     if(firstMatch){S.billAssignTxId=firstMatch.id;}
     render();
   });
