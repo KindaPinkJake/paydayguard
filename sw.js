@@ -1,4 +1,4 @@
-const CACHE='paydayguard-v2';
+const CACHE='paydayguard-v3';
 const SHELL=['./','/paydayguard/','/paydayguard/index.html','/paydayguard/manifest.json'];
 
 self.addEventListener('install',e=>{
@@ -16,13 +16,17 @@ self.addEventListener('activate',e=>{
 });
 
 self.addEventListener('fetch',e=>{
+  // Only handle GET requests — never intercept POST (Firebase, Teller, etc.)
+  if(e.request.method!=='GET')return;
+
   var url=new URL(e.request.url);
 
-  // Let Firebase SDK handle its own requests — it has its own offline queue
-  if(url.hostname.includes('firestore.googleapis.com')||
+  // Let Firebase and Teller handle their own requests
+  if(url.hostname.includes('googleapis.com')||
      url.hostname.includes('firebase')||
      url.hostname.includes('teller.io')||
-     url.hostname.includes('cloudfunctions.net')){
+     url.hostname.includes('cloudfunctions.net')||
+     url.hostname.includes('gstatic.com')){
     return;
   }
 
@@ -31,7 +35,7 @@ self.addEventListener('fetch',e=>{
     caches.match(e.request).then(cached=>{
       if(cached)return cached;
       return fetch(e.request).then(res=>{
-        if(e.request.method==='GET'&&res.ok){
+        if(res.ok){
           var clone=res.clone();
           caches.open(CACHE).then(c=>c.put(e.request,clone));
         }
