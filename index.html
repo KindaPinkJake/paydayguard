@@ -65,7 +65,8 @@ var S={
   goalForm:false,editGoal:null,
   merchantMemory:{},
   dismissedDupes:[],
-  bulkCat:false
+  bulkCat:false,
+  bulkDupes:false
 };
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -567,6 +568,28 @@ var MERCHANT_HINTS=[
   {words:['netflix','spotify','hulu','disney','apple tv','paramount','peacock','hbo','amazon prime','youtube','twitch','steam','playstation','xbox','nintendo','ticketmaster','stubhub','amc ','regal','cinemark','movie','theater','concert'],label:'entertain'},
   {words:['cvs','walgreen','rite aid','pharmacy','doctor','medical','dental','vision','clinic','hospital','urgent care','health','prescription'],label:'health'},
 ];
+
+function allSuspectedDupes(){
+  var pairs=[];var seen=new Set();
+  var expenses=S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings');
+  for(var i=0;i<expenses.length;i++){
+    var a=expenses[i];
+    var aWords=(a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
+    if(!aWords||aWords.length<3)continue;
+    for(var j=i+1;j<expenses.length;j++){
+      var b=expenses[j];
+      var bWords=(b.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
+      if(aWords!==bWords)continue;
+      if(Math.abs(a.amt-b.amt)<0.01)continue;
+      var dayDiff=Math.abs((new Date(a.date+'T00:00:00')-new Date(b.date+'T00:00:00'))/86400000);
+      if(dayDiff>3)continue;
+      var pairKey=[a.id,b.id].sort().join('|');
+      if(S.dismissedDupes.includes(pairKey))continue;
+      if(!seen.has(pairKey)){seen.add(pairKey);pairs.push({a,b,pairKey});}
+    }
+  }
+  return pairs;
+}
 
 function firstSuspectedDupe(){
   // Find two expense transactions: same merchant (first 2 words), within 3 days, different amounts
@@ -1121,6 +1144,32 @@ function historyView(){
   var uncatCount=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings').length;
 
   // Bulk categorize view
+  if(S.bulkDupes){
+    var pairs=allSuspectedDupes();
+    return`<div style="padding:16px 16px 0">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div><h2 style="font-size:18px;font-weight:600">Bulk Dupes</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${pairs.length} possible pair${pairs.length!==1?'s':''}</p></div>
+      <button class="btn" id="bulk-dupes-done-btn" style="font-size:13px;padding:6px 14px">Done</button>
+    </div>
+    ${pairs.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">No duplicate pairs found 🎉</p>':''}
+    <div style="display:flex;flex-direction:column;gap:10px">
+    ${pairs.map(dupe=>`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px">
+      <p style="font-size:12px;color:var(--tx-warn);font-weight:500;margin-bottom:8px">Same merchant · ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart</p>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+        <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+          <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
+          <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.a.amt)}</p><button class="btn" data-del-dupe="${dupe.a.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+        </div>
+        <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+          <div><p style="font-size:13px;font-weight:500">${dupe.b.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.b.date)}</p></div>
+          <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.b.amt)}</p><button class="btn" data-del-dupe="${dupe.b.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
+        </div>
+      </div>
+      <button class="btn" data-dismiss-dupe="${dupe.pairKey}" style="width:100%;font-size:12px;padding:6px;color:var(--tx2)">Both are real — keep both</button>
+    </div>`).join('')}
+    </div></div>`;
+  }
+
   if(S.bulkCat){
     var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
     // Group by normalized merchant (first 4 words, matching merchantKey) + exact amount
@@ -1169,7 +1218,7 @@ function historyView(){
     <div style="display:flex;gap:6px">
       <button class="btn" id="txBtn2" style="font-size:13px;padding:6px 12px">+ Add</button>
       ${uncatCount>5?`<button class="btn" id="bulk-cat-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Bulk (${uncatCount})</button>`:''}
-      <button class="btn" id="export-csv-btn" style="font-size:13px;padding:6px 12px;color:var(--tx2)">↓ CSV</button>
+      ${(()=>{var dp=allSuspectedDupes();return dp.length>1?`<button class="btn" id="bulk-dupes-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-warn);border-color:var(--bd-warn)">Dupes (${dp.length})</button>`:''})()}      <button class="btn" id="export-csv-btn" style="font-size:13px;padding:6px 12px;color:var(--tx2)">↓ CSV</button>
       <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
     </div>
   </div>
@@ -1240,7 +1289,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkDupes=false;S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1459,6 +1508,8 @@ function bind(){
 
   function ttf(){S.txForm=!S.txForm;render()}
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
+  var bulkDupesBtn=g('bulk-dupes-btn');if(bulkDupesBtn)bulkDupesBtn.onclick=()=>{S.bulkDupes=true;render()};
+  var bulkDupesDone=g('bulk-dupes-done-btn');if(bulkDupesDone)bulkDupesDone.onclick=()=>{S.bulkDupes=false;render()};
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
   document.querySelectorAll('[data-bulk-assign]').forEach(el=>el.onclick=()=>{
@@ -1573,7 +1624,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,tellerToken:null,tellerAccountId:null,tellerSavingsAccountId:null,tellerSyncing:false,tellerLastSync:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},dismissedDupes:[],bulkCat:false,bulkDupes:false});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
