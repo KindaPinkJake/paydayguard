@@ -381,31 +381,38 @@ function firstUncategorized(){
 }
 function banners(){
   var h='';
-  pcsToday().forEach(p=>{
-    h+=`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}</div><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button><button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
-  });
-  // Bill confirmation banners — show overdue/due bills one at a time
-  billsDue().slice(0,1).forEach(b=>{
+  // Priority 1: Paycheck
+  var pcs=pcsToday();
+  if(pcs.length){
+    var p=pcs[0];
+    return`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}</div><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button><button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
+  }
+
+  // Priority 2: Overdue/due bills
+  var due=billsDue();
+  if(due.length){
+    var b=due[0];
     var overdue=b.nextDue<tod();
-    h+=`<div style="background:var(--bg);border:1px solid ${overdue?'var(--bd-err)':'var(--bd-warn)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    return`<div style="background:var(--bg);border:1px solid ${overdue?'var(--bd-err)':'var(--bd-warn)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <div>
         <p style="font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'}">${overdue?'⚠ Overdue':'📅 Due today'} — ${b.name}</p>
         <p style="font-size:11px;color:var(--tx2);margin-top:2px">${overdue?'Was due '+fd(b.nextDue):'Due today'} · typical ${fm(b.amt)}</p>
       </div>
-      <span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${billsDue().length} bill${billsDue().length!==1?'s':''}</span>
+      ${due.length>1?`<span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${due.length} bills</span>`:''}
     </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <div style="display:flex;gap:8px;align-items:center">
       <input class="field mono" id="bill-conf-amt-${b.id}" type="number" step="0.01" placeholder="${b.amt.toFixed(2)}" style="flex:1">
       <button class="btn" data-bill-confirm="${b.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">✓ Paid</button>
       <button class="btn" data-bill-skip="${b.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Not yet</button>
     </div>
     </div>`;
-  });
-  // Daily balance confirmation banner
+  }
+
+  // Priority 3: Balance confirmation
   var unconfirmed=needsBalanceConfirm();
   if(unconfirmed.length){
-    h+=`<div style="background:var(--bg);border:1px solid var(--bd-info);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    return`<div style="background:var(--bg);border:1px solid var(--bd-info);border-radius:12px;padding:14px 16px;margin-bottom:10px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <p style="font-size:13px;font-weight:600;color:var(--tx-info)">📋 Confirm today's balances</p>
       <button class="btn" id="bal-confirm-skip" style="font-size:11px;padding:4px 10px;color:var(--tx2);min-height:0">Skip all</button>
@@ -423,13 +430,14 @@ function banners(){
     </div>`).join('')}
     </div></div>`;
   }
-  // Uncategorized transaction banner
+
+  // Priority 4: Uncategorized transaction
   var unc=firstUncategorized();
   if(unc){
     var cats=gc();
     var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings').length;
     var suggested=unc.suggestedCat||null;
-    h+=`<div style="background:var(--bg);border:1px solid var(--bd2);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    return`<div style="background:var(--bg);border:1px solid var(--bd2);border-radius:12px;padding:14px 16px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div>
           <p style="font-size:13px;font-weight:500;margin-bottom:2px">Categorize transaction${suggested?` <span style="font-size:11px;font-weight:400;color:var(--tx-info)">· suggestion below</span>`:''}</p>
@@ -449,6 +457,7 @@ function banners(){
       ${(S.loanAssignTxId===unc.id||unc.suggestedLoanId)&&S.loans.length?`<div style="margin-top:4px;border-top:1px solid var(--bd);padding-top:8px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">${unc.suggestedLoanId?'Looks like this loan:':'Which loan is this for?'}</p><div style="display:flex;flex-direction:column;gap:6px">${S.loans.map(l=>{var isSug=l.id===unc.suggestedLoanId;return`<button data-loan-assign="${unc.id}" data-loan-id="${l.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${isSug?'border-color:var(--tx-info);background:var(--bg-info);':''}"><span>${isSug?'✓ ':''} ${l.name}</span><span class="mono" style="color:var(--tx-err)">${fm(l.bal)} remaining</span></button>`;}).join('')}</div></div>`:''}
     </div>`;
   }
+
   return h;
 }
 
@@ -1195,8 +1204,7 @@ function bind(){
     S.importView=false;S.importData=null;S.importFiles=[];
     save();render();
   };
-  var importBtn=g('import-btn');
-
+  var importBtn=g('import-btn');if(importBtn)importBtn.onclick=()=>{S.importView=true;S.importData=null;S.importFiles=[];render()};
   // Categorize transaction banners
   document.querySelectorAll('[data-cat-assign]').forEach(el=>el.onclick=()=>{
     var txId=el.dataset.catAssign,cat=el.dataset.catVal;
@@ -1233,20 +1241,23 @@ function bind(){
     if(!bill)return;
     var tx=S.txns.find(t=>t.id===txId);
     if(tx&&tx.desc){var key=merchantKey(tx.desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__bill:'+billId};}
-    // If in bulk mode, apply to all matching transactions (same merchantKey + amount)
+    // Only advance nextDue if this transaction is for the current cycle
+    // (tx date >= bill's current nextDue minus one full period, i.e. it's recent)
+    var shouldAdvance=tx&&tx.date>=bill.nextDue;
+    // If in bulk mode, apply to all matching transactions
     if(S.bulkCat&&tx){
       var mKey=merchantKey(tx.desc);
       var firstDone=false;
       S.txns=S.txns.map(t=>{
         if(merchantKey(t.desc)===mKey&&t.amt===tx.amt&&!t.isBillPayment){
-          if(!firstDone){firstDone=true;S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);}
+          if(!firstDone&&shouldAdvance){firstDone=true;S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);}
           return{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined};
         }
         return t;
       });
     }else{
       S.txns=S.txns.map(t=>t.id===txId?{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined}:t);
-      S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+      if(shouldAdvance)S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
     }
     S.billAssignTxId=null;
     // Variance check — only for single transaction assignments, not bulk
