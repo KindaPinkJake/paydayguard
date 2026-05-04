@@ -298,6 +298,7 @@ async function tellerSync(){
         var amt=rawAmt;
         var desc=t.description||t.details?.counterparty?.name||'Chime transaction';
         var tx={id:uid(),tellerId:t.id,desc,amt,date:t.date,account:'chime'};
+        if(t.running_balance!=null)tx.runningBal=Math.round(parseFloat(t.running_balance)*100)/100;
         if(isCredit){tx.txType='income';}
         else if(isSavingsTransfer(desc)){tx.txType='savings_transfer';}
         else{
@@ -577,6 +578,24 @@ function allSuspectedDupes(){
   return pairs;
 }
 
+function dupeConfidence(a,b){
+  // If both have running balances, check if the balance actually dropped twice
+  if(a.runningBal==null||b.runningBal==null)return null;
+  // Sort by date to get chronological order
+  var first=a.date<=b.date?a:b;
+  var second=a.date<=b.date?b:a;
+  // Find the transaction just before 'first' to get the baseline balance
+  var expenses=S.txns.filter(t=>t.runningBal!=null&&t.account==='chime'&&t.date<=first.date&&t.id!==first.id&&t.id!==second.id);
+  if(!expenses.length)return null;
+  var prev=expenses.sort((x,y)=>y.date.localeCompare(x.date)||0)[0];
+  // If second.runningBal ≈ first.runningBal, the balance didn't actually drop — strong dupe signal
+  var balDiff=Math.abs(second.runningBal-first.runningBal);
+  var expectedDrop=Math.abs(second.amt);
+  if(balDiff<0.02)return'confirmed'; // balance didn't move at all — almost certainly dupe
+  if(Math.abs(balDiff-expectedDrop)<0.02)return'real'; // balance dropped by exactly the amount — real charge
+  return null; // inconclusive
+}
+
 function firstSuspectedDupe(){
   // Find two expense transactions: same merchant (first 2 words), within 3 days, different amounts
   var expenses=S.txns.filter(t=>t.amt<0&&!t.isBillPayment&&t.txType!=='savings_transfer'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='income'&&t.account!=='chimeSavings');
@@ -660,7 +679,7 @@ function banners(){
       <p style="font-size:13px;font-weight:600;color:var(--tx-warn)">⚠ Possible duplicate charge</p>
       ${(()=>{var total=allSuspectedDupes().length;return total>1?`<span style="font-size:11px;color:var(--tx-warn);background:var(--bg-warn);padding:3px 8px;border-radius:6px">${total} pairs</span>`:'';})()} 
     </div>
-    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Same merchant, ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart — is one a duplicate?</p>
+    <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">${(()=>{var conf=dupeConfidence(dupe.a,dupe.b);return conf==='confirmed'?'<span style="color:var(--tx-err);font-weight:500">⚠ Balance didn\'t drop twice — likely a duplicate</span>':conf==='real'?'<span style="color:var(--tx-ok)">✓ Balance dropped for both — both appear real</span>':'Same merchant, '+Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))+' day(s) apart — is one a duplicate?';})()}</p>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
       <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
         <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
@@ -1111,9 +1130,11 @@ function historyView(){
         ${grp.pairs.map(dupe=>{
           var older=dupe.a.date<=dupe.b.date?dupe.a:dupe.b;
           var newer=dupe.a.date<=dupe.b.date?dupe.b:dupe.a;
-          return`<div style="background:var(--bg2);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--tx2);display:flex;justify-content:space-between">
-            <span>${fd(older.date)} <span style="color:var(--tx-ok)">✓ keep</span> · ${fd(newer.date)} <span style="color:var(--tx-err)">× delete</span></span>
-            <span class="mono">${fm(dupe.a.amt)}</span>
+          var conf=dupeConfidence(dupe.a,dupe.b);
+          var confHtml=conf==='confirmed'?'<span style="color:var(--tx-err)">balance confirms dupe</span>':conf==='real'?'<span style="color:var(--tx-ok)">balance shows both real</span>':'<span style="color:var(--tx2)">balance inconclusive</span>';
+          return`<div style="background:var(--bg2);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--tx2);display:flex;justify-content:space-between;align-items:center">
+            <span>${fd(older.date)} <span style="color:var(--tx-ok)">✓ keep</span> · ${fd(newer.date)} <span style="color:var(--tx-err)">× delete</span> · ${confHtml}</span>
+            <span class="mono" style="flex-shrink:0;margin-left:8px">${fm(dupe.a.amt)}</span>
           </div>`;
         }).join('')}
       </div>
