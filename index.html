@@ -1297,6 +1297,8 @@ function bind(){
     var bill=S.bills.find(b=>b.id===bid);if(!bill)return;
     S.txForm=true;S.txType='expense';S.txAcct='chime';S.pendingBillLog={id:bid,amt:bill.amt,name:bill.name};
     render();
+    var content=document.getElementById('content');
+    if(content)content.scrollTop=content.scrollHeight;
     setTimeout(()=>{
       var d=document.getElementById('txD');if(d)d.value=bill.name;
       var a=document.getElementById('txA');if(a)a.value=bill.amt.toFixed(2);
