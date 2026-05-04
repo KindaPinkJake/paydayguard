@@ -1080,26 +1080,43 @@ function historyView(){
   // Bulk categorize view
   if(S.bulkDupes){
     var pairs=allSuspectedDupes();
+    // Group pairs by merchant (first 2 words)
+    var groups=new Map();
+    pairs.forEach(dupe=>{
+      var key=(dupe.a.desc||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,2).join(' ');
+      if(!groups.has(key))groups.set(key,{merchant:dupe.a.desc,pairs:[]});
+      groups.get(key).pairs.push(dupe);
+    });
+    var groupArr=Array.from(groups.values()).sort((a,b)=>b.pairs.length-a.pairs.length);
     return`<div style="padding:16px 16px 0">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div><h2 style="font-size:18px;font-weight:600">Bulk Dupes</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${pairs.length} possible pair${pairs.length!==1?'s':''}</p></div>
-      <button class="btn" id="bulk-dupes-done-btn" style="font-size:13px;padding:6px 14px">Done</button>
-    </div>
-    ${pairs.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">No duplicate pairs found 🎉</p>':''}
-    <div style="display:flex;flex-direction:column;gap:10px">
-    ${pairs.map(dupe=>`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px">
-      <p style="font-size:12px;color:var(--tx-warn);font-weight:500;margin-bottom:8px">Same merchant · ${Math.abs(Math.round((new Date(dupe.a.date+'T00:00:00')-new Date(dupe.b.date+'T00:00:00'))/86400000))} day(s) apart</p>
-      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-        <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-          <div><p style="font-size:13px;font-weight:500">${dupe.a.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.a.date)}</p></div>
-          <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.a.amt)}</p><button class="btn" data-del-dupe="${dupe.a.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
-        </div>
-        <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-          <div><p style="font-size:13px;font-weight:500">${dupe.b.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(dupe.b.date)}</p></div>
-          <div style="display:flex;align-items:center;gap:8px"><p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(dupe.b.amt)}</p><button class="btn" data-del-dupe="${dupe.b.id}" data-dupe-pair="${dupe.pairKey}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx-err);border-color:var(--bd-err)">Delete</button></div>
-        </div>
+      <div><h2 style="font-size:18px;font-weight:600">Bulk Dupes</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${groupArr.length} merchant${groupArr.length!==1?'s':''} · ${pairs.length} pair${pairs.length!==1?'s':''}</p></div>
+      <div style="display:flex;gap:6px">
+        ${pairs.length>0?`<button class="btn" id="bulk-dupes-delete-all" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Delete all</button>`:''}
+        <button class="btn" id="bulk-dupes-done-btn" style="font-size:13px;padding:6px 14px">Done</button>
       </div>
-      <button class="btn" data-dismiss-dupe="${dupe.pairKey}" style="width:100%;font-size:12px;padding:6px;color:var(--tx2)">Both are real — keep both</button>
+    </div>
+    ${groupArr.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">No duplicate pairs found 🎉</p>':''}
+    <div style="display:flex;flex-direction:column;gap:10px">
+    ${groupArr.map(grp=>`<div style="background:var(--bg);border:1px solid var(--bd-warn);border-radius:12px;padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <p style="font-size:14px;font-weight:500">${grp.merchant}</p>
+        <p style="font-size:11px;color:var(--tx-warn)">${grp.pairs.length} pair${grp.pairs.length!==1?'s':''}</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
+        ${grp.pairs.map(dupe=>{
+          var older=dupe.a.date<=dupe.b.date?dupe.a:dupe.b;
+          var newer=dupe.a.date<=dupe.b.date?dupe.b:dupe.a;
+          return`<div style="background:var(--bg2);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--tx2);display:flex;justify-content:space-between">
+            <span>${fd(older.date)} <span style="color:var(--tx-ok)">✓ keep</span> · ${fd(newer.date)} <span style="color:var(--tx-err)">× delete</span></span>
+            <span class="mono">${fm(dupe.a.amt)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn" data-del-dupe-group="${grp.pairs.map(d=>d.a.id+'~'+d.b.id+'~'+d.pairKey).join('|')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx-err);border-color:var(--bd-err)">Delete duplicates (${grp.pairs.length})</button>
+        <button class="btn" data-dismiss-dupe-group="${grp.pairs.map(d=>d.pairKey).join('|')}" style="flex:1;font-size:12px;padding:6px;color:var(--tx2)">Keep all</button>
+      </div>
     </div>`).join('')}
     </div></div>`;
   }
@@ -1442,6 +1459,45 @@ function bind(){
 
   function ttf(){S.txForm=!S.txForm;render()}
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
+  document.querySelectorAll('[data-del-dupe-group]').forEach(el=>el.onclick=()=>{
+    var entries=el.dataset.delDupeGroup.split('|');
+    entries.forEach(entry=>{
+      var parts=entry.split('~');
+      var aId=parts[0],bId=parts[1],pairKey=parts[2];
+      // Keep older, delete newer
+      var txA=S.txns.find(t=>t.id===aId),txB=S.txns.find(t=>t.id===bId);
+      if(!txA||!txB)return;
+      var toDelete=txA.date>=txB.date?txA:txB;
+      if(toDelete.cat){var env=S.envelopes[toDelete.cat]||0;S.envelopes={...S.envelopes,[toDelete.cat]:Math.round((env+Math.abs(toDelete.amt))*100)/100};}
+      if(toDelete.account==='hsa')S.hsa=Math.round((S.hsa+Math.abs(toDelete.amt))*100)/100;
+      else if(toDelete.account!=='chimeSavings')S.bal=Math.round((S.bal-toDelete.amt)*100)/100;
+      S.txns=S.txns.filter(t=>t.id!==toDelete.id);
+      S.dismissedDupes=[...S.dismissedDupes,pairKey];
+    });
+    save();render();
+  });
+  document.querySelectorAll('[data-dismiss-dupe-group]').forEach(el=>el.onclick=()=>{
+    var pairKeys=el.dataset.dismissDupeGroup.split('|');
+    S.dismissedDupes=[...S.dismissedDupes,...pairKeys];
+    save();render();
+  });
+  var bulkDupesDeleteAll=g('bulk-dupes-delete-all');if(bulkDupesDeleteAll)bulkDupesDeleteAll.onclick=()=>{
+    if(!confirm('Delete one transaction from each duplicate pair? This keeps the older entry and removes the newer one.'))return;
+    var pairs=allSuspectedDupes();
+    pairs.forEach(dupe=>{
+      // Keep the older transaction (earlier date), delete the newer one
+      var toDelete=dupe.a.date>=dupe.b.date?dupe.a:dupe.b;
+      var tx=S.txns.find(t=>t.id===toDelete.id);
+      if(tx){
+        if(tx.cat){var env=S.envelopes[tx.cat]||0;S.envelopes={...S.envelopes,[tx.cat]:Math.round((env+Math.abs(tx.amt))*100)/100};}
+        if(tx.account==='hsa')S.hsa=Math.round((S.hsa+Math.abs(tx.amt))*100)/100;
+        else if(tx.account!=='chimeSavings')S.bal=Math.round((S.bal-tx.amt)*100)/100;
+      }
+      S.txns=S.txns.filter(t=>t.id!==toDelete.id);
+      S.dismissedDupes=[...S.dismissedDupes,dupe.pairKey];
+    });
+    S.bulkDupes=false;save();render();
+  };
   var bulkDupesBtn=g('bulk-dupes-btn');if(bulkDupesBtn)bulkDupesBtn.onclick=()=>{S.bulkDupes=true;render()};
   var bulkDupesDone=g('bulk-dupes-done-btn');if(bulkDupesDone)bulkDupesDone.onclick=()=>{S.bulkDupes=false;render()};
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
