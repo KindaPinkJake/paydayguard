@@ -116,6 +116,21 @@ function startListener(){
       S.merchantMemory=d.merchantMemory||{};
     }
     render();
+    // One-time migration: clean existing duplicates (pending→settled with different tellerIds)
+    // Only collapses where both transactions have a tellerId (both from Teller, not manual entries)
+    if(firstLoad){
+      var seen=new Map();
+      var before=S.txns.length;
+      S.txns=S.txns.filter(t=>{
+        var key=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
+        if(!seen.has(key)){seen.set(key,t);return true;}
+        var existing=seen.get(key);
+        // Only deduplicate if both have tellerIds — never remove manual entries
+        if(t.tellerId&&existing.tellerId)return false;
+        return true;
+      });
+      if(S.txns.length<before)save();
+    }
     // One-time migration: fix income transactions on first load
     if(firstLoad){
       var changed=false;
@@ -135,7 +150,26 @@ function startListener(){
       });
       if(changed)save();
     }
-    // Auto-sync with Teller on first load if connected
+    // One-time dedup: collapse pending→settled duplicates (same desc+date+amount, keep tellerId version)
+    if(firstLoad){
+      var beforeLen=S.txns.length;
+      var seen=new Map();
+      S.txns=S.txns.filter(t=>{
+        var key=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
+        if(!seen.has(key)){seen.set(key,t);return true;}
+        var existing=seen.get(key);
+        if(t.tellerId&&!existing.tellerId){
+          // Replace the kept one with the tellerId version
+          seen.set(key,t);
+          return true;
+        }
+        return false;
+      });
+      // Second pass: remove any entries that were superseded above
+      var kept=new Set(seen.values());
+      S.txns=S.txns.filter(t=>kept.has(t));
+      if(S.txns.length<beforeLen)save();
+    }
     if(firstLoad&&S.tellerToken&&S.tellerAccountId){
       firstLoad=false;
       tellerSync();
@@ -206,7 +240,15 @@ async function tellerSync(){
         return t;
       });
       // Only import transactions we haven't seen before (by Teller ID)
-      var newTxns=txData.transactions.filter(t=>!existing.has(t.id)).map(t=>{
+      // Also catch pending→settled duplicates: same desc+date+amount, keep the one with tellerId
+      var newTxns=txData.transactions.filter(t=>{
+        if(existing.has(t.id))return false;
+        var amt=parseFloat(t.amount||0);
+        var desc=(t.description||'').trim();
+        var dupe=S.txns.find(x=>x.date===t.date&&x.amt===amt&&(x.desc||'').trim()===desc);
+        if(dupe){if(!dupe.tellerId){S.txns=S.txns.map(x=>x===dupe?{...x,tellerId:t.id}:x);}return false;}
+        return true;
+      }).map(t=>{
         var rawAmt=parseFloat(t.amount||0);
         var isCredit=rawAmt>0;
         var amt=rawAmt;
@@ -277,7 +319,14 @@ async function tellerSync(){
       var savTxData=await savTxRes.json();
       if(savTxData.transactions&&savTxData.transactions.length){
         var existingSav=new Set(S.txns.filter(t=>t.tellerId).map(t=>t.tellerId));
-        var newSavTxns=savTxData.transactions.filter(t=>!existingSav.has(t.id)).map(t=>{
+        var newSavTxns=savTxData.transactions.filter(t=>{
+          if(existingSav.has(t.id))return false;
+          var amt=parseFloat(t.amount||0);
+          var desc=(t.description||'').trim();
+          var dupe=S.txns.find(x=>x.account==='chimeSavings'&&x.date===t.date&&x.amt===amt&&(x.desc||'').trim()===desc);
+          if(dupe){if(!dupe.tellerId){S.txns=S.txns.map(x=>x===dupe?{...x,tellerId:t.id}:x);}return false;}
+          return true;
+        }).map(t=>{
           var isCredit=t.type==='credit';
           var amt=isCredit?Math.abs(parseFloat(t.amount)):-Math.abs(parseFloat(t.amount));
           var desc=t.description||'Savings transfer';
