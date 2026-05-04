@@ -1,5 +1,5 @@
-const CACHE='paydayguard-v3';
-const SHELL=['./','/paydayguard/','/paydayguard/index.html','/paydayguard/manifest.json'];
+const CACHE='paydayguard-v4';
+const SHELL=['/paydayguard/','/paydayguard/index.html','/paydayguard/manifest.json'];
 
 self.addEventListener('install',e=>{
   e.waitUntil(
