@@ -196,7 +196,9 @@ function upcoming(){
   var pd=getPayday();
   if(!pd)return[];
   var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');
-  return S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd}).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
+  var upBills=S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd}).map(b=>({...b,_type:'bill'}));
+  var upLoans=S.loans.filter(l=>l.nextDue&&l.payment>0&&l.bal>0).filter(l=>{var d=new Date(l.nextDue+'T00:00:00');return d>=now&&d<=pdd}).map(l=>({...l,_type:'loan',amt:l.payment}));
+  return upBills.concat(upLoans).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
 }
 function safe(){return S.bal-upcoming().reduce((s,b)=>s+b.amt,0)}
 function days(){var pd=getPayday();if(!pd)return null;var now=new Date();now.setHours(0,0,0,0);return Math.ceil((new Date(pd+'T00:00:00')-now)/86400000)}
@@ -652,23 +654,23 @@ function homeView(){
   ${/* Safe to spend — hero */''}
   ${combinedSpendCard(sf,st,up,tot)}
 
-  ${/* Balance cards */''}
-  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">${bcard('Chime','chime',S.bal)}${bcard('HSA','hsa',S.hsa)}</div>
-
-  ${/* Savings */''}
-  ${savingsCard()}
-
   ${/* Due before payday */''}
   ${up.length?`<div style="margin-bottom:10px">
     <p style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--tx2);margin-bottom:8px">Due before payday</p>
-    <div style="display:flex;flex-direction:column;gap:6px">${up.map(b=>{var paid=isBillPaid(b.id);return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid ${paid?'var(--bd-ok)':'var(--bd)'};border-radius:10px;padding:11px 14px">
-      <p style="font-size:14px;color:${paid?'var(--tx-ok)':'var(--tx)'}">${b.name}</p>
+    <div style="display:flex;flex-direction:column;gap:6px">${up.map(b=>{var paid=b._type==='loan'?false:isBillPaid(b.id);return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid ${paid?'var(--bd-ok)':'var(--bd)'};border-radius:10px;padding:11px 14px">
+      <p style="font-size:14px;color:${paid?'var(--tx-ok)':'var(--tx)'}">${b.name}${b._type==='loan'?` <span style="font-size:10px;color:var(--tx2)">loan</span>`:''}</p>
       <div style="text-align:right">
         <p class="mono" style="font-size:14px;font-weight:600;color:${paid?'var(--tx-ok)':'var(--tx-err)'}">${paid?'✓ ':''}${fm(b.amt)}</p>
         <p style="font-size:10px;color:var(--tx2);margin-top:1px">${fd(b.nextDue)}</p>
       </div>
     </div>`;}).join('')}</div>
   </div>`:''}
+
+  ${/* Balance cards */''}
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">${bcard('Chime','chime',S.bal)}${bcard('HSA','hsa',S.hsa)}</div>
+
+  ${/* Savings */''}
+  ${savingsCard()}
 
   ${/* Savings rate */''}
   ${sr!==null?`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:11px 14px;margin-bottom:10px">
@@ -677,7 +679,6 @@ function homeView(){
   </div>`:''}
 
   ${/* Loans */''}
-  ${loansHome()}
 
   ${/* Tx form */''}
   ${S.txForm?txForm():''}
@@ -818,6 +819,8 @@ function billsView(){
     </div>
   </div>
 
+  ${loanMgr()}
+
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <p style="font-size:14px;font-weight:500">Recurring bills</p>
     <button class="btn" id="addBillBtn" style="font-size:13px;padding:6px 12px">+ Add bill</button>
@@ -827,7 +830,6 @@ function billsView(){
   <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
   ${S.bills.slice().sort((a,b)=>a.nextDue.localeCompare(b.nextDue)).map(b=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><p style="font-size:15px;font-weight:500">${b.name}</p><p class="mono" style="font-size:18px;font-weight:500;color:var(--tx-err)">${fm(b.amt)}</p></div><div style="display:flex;justify-content:space-between;align-items:center"><p style="font-size:12px;color:var(--tx2)">Next due: ${fd(b.nextDue)}&nbsp;•&nbsp;${b.rec}</p><div style="display:flex;gap:6px"><button class="btn" data-eb="${b.id}" style="font-size:12px;padding:4px 10px">Edit</button><button class="btn" data-delb="${b.id}" style="font-size:12px;padding:4px 10px;color:var(--tx-err)">Delete</button></div></div></div>`).join('')}
   </div>
-  ${loanMgr()}
   </div>`;
 }
 
