@@ -214,17 +214,21 @@ function ttag(cat){if(!cat)return'';var c=gcat(cat),cl=co(c.color);return`<span 
 function swatch(k,sel){var cl=co(k);return`<button type="button" data-swatch="${k}" style="width:32px;height:32px;border-radius:50%;background:${cl.bg};border:${sel?'3px solid '+cl.c:'1px solid var(--bd)'};cursor:pointer;flex-shrink:0"></button>`}
 function bcard(title,bid,val){
   var confirmedDate=bid==='chime'?S.balConfirmedDate:bid==='hsa'?S.hsaConfirmedDate:null;
-  var lastConfirmed=confirmedDate?`<p style="font-size:10px;color:var(--tx2);margin-top:4px">Confirmed ${fd(confirmedDate)}</p>`:'<p style="font-size:10px;color:var(--tx-warn);margin-top:4px">Not yet confirmed</p>';
-  return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px">
-    <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:4px">${title}</p>
-    <p class="mono" style="font-size:22px;font-weight:500;margin-bottom:8px">${fm(val)}</p>
-    <div style="display:flex;gap:6px">
-      <button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
-      <button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
+  var confirmed=confirmedDate===tod();
+  return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:14px;padding:14px 16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div>
+        <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--tx2);margin-bottom:3px">${title}</p>
+        <p class="mono" style="font-size:24px;font-weight:600;line-height:1">${fm(val)}</p>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:2px">
+        <button class="btn" id="${bid}-eb" style="font-size:11px;padding:4px 9px">Edit</button>
+        <button class="btn" id="${bid}-log" style="font-size:11px;padding:4px 9px">+ Log</button>
+      </div>
     </div>
-    ${lastConfirmed}
-    <div id="${bid}-f" style="display:none;margin-top:8px">
-      <input class="field mono" id="${bid}-i" type="number" step="0.01" placeholder="Balance" style="margin-bottom:6px">
+    <p style="font-size:10px;color:${confirmed?'var(--tx-ok)':'var(--tx-warn)'}">${confirmed?'✓ Confirmed today':'Not yet confirmed'}</p>
+    <div id="${bid}-f" style="display:none;margin-top:10px;border-top:1px solid var(--bd);padding-top:10px">
+      <input class="field mono" id="${bid}-i" type="number" step="0.01" placeholder="New balance" style="margin-bottom:6px">
       <button class="btn" id="${bid}-sb" style="width:100%;font-size:12px;padding:6px">Save</button>
     </div>
   </div>`;
@@ -573,11 +577,11 @@ function combinedSpendCard(sf,st,up,tot){
   var prev=prevCycleStart();
   var hasBudgets=budgetsConfigured()&&pd;
 
-  return`<div style="border-radius:12px;padding:16px;margin-bottom:10px;border:1px solid ${st.br};background:${st.bg}">
-    <p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:${st.c};margin-bottom:4px">Safe to spend</p>
-    <p class="mono" style="font-size:36px;font-weight:600;color:${st.c}">${fm(sf)}</p>
-    <p style="font-size:12px;margin-top:2px;margin-bottom:${hasBudgets?'14':'0'}px;color:${st.c};opacity:.8">${up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income'}</p>
-    ${hasBudgets?`<div style="border-top:1px solid ${st.br};padding-top:14px">
+  return`<div style="border-radius:14px;padding:18px;margin-bottom:10px;border:1px solid ${st.br};background:${st.bg}">
+    <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:${st.c};margin-bottom:4px">Safe to spend</p>
+    <p class="mono" style="font-size:42px;font-weight:700;color:${st.c};line-height:1">${fm(sf)}</p>
+    <p style="font-size:12px;margin-top:6px;color:${st.c};opacity:.75">${up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income'}</p>
+    ${hasBudgets?`<div style="border-top:1px solid ${st.br};margin-top:14px;padding-top:14px">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
       <svg width="52" height="52" viewBox="0 0 60 60" style="flex-shrink:0">
         <circle cx="30" cy="30" r="23" fill="none" stroke="var(--bd)" stroke-width="7"/>
@@ -586,10 +590,10 @@ function combinedSpendCard(sf,st,up,tot){
         <text x="30" y="39" text-anchor="middle" font-size="12" font-weight="500" fill="var(--tx)" font-family="'SF Mono',monospace">${Math.round(spentPct*100)}%</text>
       </svg>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1">
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Spent</p><p class="mono" style="font-size:14px;font-weight:500">${fm(totalSpent)}</p></div>
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Remaining</p><p class="mono" style="font-size:14px;font-weight:500">${fm(Math.max(0,totalAllocated-totalSpent))}</p></div>
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Budgeted</p><p class="mono" style="font-size:14px;font-weight:500">${fm(totalAllocated)}</p></div>
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Days left</p><p class="mono" style="font-size:14px;font-weight:500">${dy!==null?dy:'--'}</p></div>
+        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Spent</p><p class="mono" style="font-size:14px;font-weight:600">${fm(totalSpent)}</p></div>
+        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Remaining</p><p class="mono" style="font-size:14px;font-weight:600;color:var(--tx-ok)">${fm(Math.max(0,totalAllocated-totalSpent))}</p></div>
+        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Budgeted</p><p class="mono" style="font-size:14px;font-weight:600">${fm(totalAllocated)}</p></div>
+        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Days left</p><p class="mono" style="font-size:14px;font-weight:600">${dy!==null?dy:'--'}</p></div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
@@ -599,12 +603,12 @@ function combinedSpendCard(sf,st,up,tot){
       var dotC=co(c.color).c,amtC=tileAmtColor(rem,alloc),bC=barColor(spent,alloc);
       var prevSpent=prev?spentBetween(c.id,prev,S.lastPaycheckDate):null;
       var trendHtml='';
-      if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<p style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-top:2px">${diff<0?'↓':'↑'} ${pct}% vs last cycle</p>`;}
-      return`<div style="background:var(--bg);border-radius:8px;padding:10px 12px;opacity:.9">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><div style="width:7px;height:7px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2)">${c.label}</p></div>
-        <p class="mono" style="font-size:16px;font-weight:500;color:${amtC}">${fm(rem)}</p>
-        <div style="height:5px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:6px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(spPct*100)}%"></div></div>
-        <p style="font-size:11px;color:var(--tx2);margin-top:3px">left of ${fm(alloc)}</p>
+      if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<p style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-top:2px">${diff<0?'↓':'↑'} ${pct}% vs last</p>`;}
+      return`<div style="background:var(--bg);border-radius:10px;padding:11px 13px">
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px"><div style="width:6px;height:6px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2);font-weight:500">${c.label}</p></div>
+        <p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${fm(rem)}</p>
+        <div style="height:4px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:7px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(spPct*100)}%"></div></div>
+        <p style="font-size:10px;color:var(--tx2);margin-top:4px">of ${fm(alloc)}</p>
         ${trendHtml}
       </div>`;
     }).join('')}
@@ -615,36 +619,68 @@ function combinedSpendCard(sf,st,up,tot){
 function homeView(){
   var pd=getPayday();
   var sf=safe(),lv=showLevel(sf),st=ls(lv),dy=days();
-  var msg=pd&&lv==='danger'?'You may be short before payday.':pd&&lv==='warning'?'Cutting it close — watch your spending.':'';
   var up=upcoming(),tot=up.reduce((s,b)=>s+b.amt,0);
-  return`<div style="padding:16px 16px 0">
-  ${banners()}
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-    <div><p style="font-size:20px;font-weight:600">PaydayGuard</p>
-    ${dy!==null?`<p style="font-size:12px;color:var(--tx2);margin-top:2px">${dy>1?'Payday in '+dy+' days':dy===1?'Payday tomorrow':dy===0?'Payday today':'Payday was '+Math.abs(dy)+' day'+(Math.abs(dy)!==1?'s':'')+' ago'}</p>`:'<p style="font-size:12px;color:var(--tx2);margin-top:2px">No paycheck set up yet</p>'}
+  var sr=savingsRate();
+  return`<div style="padding:16px 16px 80px">
+
+  ${/* Header */''}
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <div>
+      <p style="font-size:22px;font-weight:700;letter-spacing:-.3px">PaydayGuard</p>
+      <p style="font-size:12px;color:var(--tx2);margin-top:2px">${dy!==null?(dy>1?'Payday in '+dy+' days':dy===1?'Payday tomorrow':dy===0?'🎉 Payday today':'Payday was '+Math.abs(dy)+' day'+(Math.abs(dy)!==1?'s':'')+' ago'):'No paycheck set up'}</p>
     </div>
-    <div style="display:flex;align-items:center;gap:8px">
+    <div style="display:flex;align-items:center;gap:4px">
       ${pd?`<span style="font-size:12px;color:var(--tx2);background:var(--bg);padding:4px 10px;border-radius:8px;border:1px solid var(--bd)">${fd(pd)}</span>`:''}
-      <button id="soBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:14px;padding:4px 6px" title="Sign out">⎋</button>
-      <button id="shareBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:14px;padding:4px 6px" title="Share">🔗</button>
+      <button id="soBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:16px;padding:6px" title="Sign out">⎋</button>
+      <button id="shareBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:16px;padding:6px" title="Share">🔗</button>
     </div>
   </div>
-  ${S.showSharePanel?`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+
+  ${/* Banner */''}
+  ${banners()}
+
+  ${/* Share panel */''}
+  ${S.showSharePanel?`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:14px">
     <p style="font-size:13px;font-weight:500;margin-bottom:8px">Share read-only view</p>
     ${S.shareToken
-      ?`<p style="font-size:12px;color:var(--tx2);margin-bottom:8px">Anyone with this link can view your data (read-only). They cannot edit anything.</p>
+      ?`<p style="font-size:12px;color:var(--tx2);margin-bottom:8px">Anyone with this link can view your data (read-only).</p>
         <div style="display:flex;gap:8px;margin-bottom:8px"><input class="field" id="share-url-inp" value="${shareUrl()}" readonly style="font-size:12px;flex:1"><button class="btn" id="share-copy-btn" style="font-size:12px;padding:5px 10px;white-space:nowrap">Copy</button></div>
         <button class="btn" id="share-revoke-btn" style="width:100%;font-size:13px;color:var(--tx-err);border-color:var(--bd-err)">Revoke access</button>`
-      :`<p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Generate a link to share a read-only snapshot of your data. You can revoke it anytime.</p>
+      :`<p style="font-size:12px;color:var(--tx2);margin-bottom:10px">Generate a link to share a read-only snapshot. You can revoke it anytime.</p>
         <button class="btn" id="share-create-btn" style="width:100%;font-size:13px;font-weight:500">Generate share link</button>`}
   </div>`:''}
-  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">${bcard('Chime','chime',S.bal)}${bcard('HSA','hsa',S.hsa)}</div>
-  ${savingsCard()}
-  ${msg?`<div style="background:${st.bg};border:1px solid ${st.br};border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:${st.c}">${msg}</div>`:''}
+
+  ${/* Safe to spend — hero */''}
   ${combinedSpendCard(sf,st,up,tot)}
-  ${up.length?`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Due before payday</p><div style="display:flex;flex-direction:column;gap:6px">${up.map(b=>{var paid=isBillPaid(b.id);return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid ${paid?'var(--bd-ok)':'var(--bd)'};border-radius:8px;padding:10px 14px;${paid?'opacity:.75':''}"><p style="font-size:14px;color:${paid?'var(--tx-ok)':'var(--tx)'}">${b.name}</p><div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:${paid?'var(--tx-ok)':'var(--tx-err)'}">${paid?'✓ ':''} ${fm(b.amt)}</p><p style="font-size:11px;color:var(--tx2)">${fd(b.nextDue)}</p></div></div>`;}).join('')}</div></div>`:''}
-  ${(()=>{var sr=savingsRate();return sr!==null?`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;margin-bottom:10px"><p style="font-size:12px;color:var(--tx2)">Savings rate this cycle</p><p class="mono" style="font-size:15px;font-weight:500;color:${sr>=20?'var(--tx-ok)':sr>=10?'var(--tx-warn)':'var(--tx-err)'}">${sr}%</p></div>`:''})()}
+
+  ${/* Balance cards */''}
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">${bcard('Chime','chime',S.bal)}${bcard('HSA','hsa',S.hsa)}</div>
+
+  ${/* Savings */''}
+  ${savingsCard()}
+
+  ${/* Due before payday */''}
+  ${up.length?`<div style="margin-bottom:10px">
+    <p style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--tx2);margin-bottom:8px">Due before payday</p>
+    <div style="display:flex;flex-direction:column;gap:6px">${up.map(b=>{var paid=isBillPaid(b.id);return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid ${paid?'var(--bd-ok)':'var(--bd)'};border-radius:10px;padding:11px 14px">
+      <p style="font-size:14px;color:${paid?'var(--tx-ok)':'var(--tx)'}">${b.name}</p>
+      <div style="text-align:right">
+        <p class="mono" style="font-size:14px;font-weight:600;color:${paid?'var(--tx-ok)':'var(--tx-err)'}">${paid?'✓ ':''}${fm(b.amt)}</p>
+        <p style="font-size:10px;color:var(--tx2);margin-top:1px">${fd(b.nextDue)}</p>
+      </div>
+    </div>`;}).join('')}</div>
+  </div>`:''}
+
+  ${/* Savings rate */''}
+  ${sr!==null?`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:11px 14px;margin-bottom:10px">
+    <p style="font-size:13px;color:var(--tx2)">Savings rate this cycle</p>
+    <p class="mono" style="font-size:16px;font-weight:600;color:${sr>=20?'var(--tx-ok)':sr>=10?'var(--tx-warn)':'var(--tx-err)'}">${sr}%</p>
+  </div>`:''}
+
+  ${/* Loans */''}
   ${loansHome()}
+
+  ${/* Tx form */''}
   ${S.txForm?txForm():''}
   </div>`;
 }
@@ -1317,10 +1353,14 @@ function bind(){
       S.bal=Math.round((S.bal+v)*100)/100;
       var sts=safe();
       var cats=gc(),newEnv={};
-      cats.forEach(c=>{newEnv[c.id]=Math.round(sts*(c.budgetPct||0)*100)/100});
+      var allocated=0;
+      cats.forEach(c=>{var amt=Math.round(sts*(c.budgetPct||0)*100)/100;newEnv[c.id]=amt;allocated=Math.round((allocated+amt)*100)/100;});
       var totalSavingsTransfer=0;
-      S.savingsGoals=S.savingsGoals.map(g=>{
-        var contrib=Math.round(sts*(g.budgetPct||0)*100)/100;
+      S.savingsGoals=S.savingsGoals.map((g,idx,arr)=>{
+        var isLast=idx===arr.length-1;
+        var contrib=isLast?Math.round((sts-allocated)*100)/100:Math.round(sts*(g.budgetPct||0)*100)/100;
+        if(!isLast)allocated=Math.round((allocated+contrib)*100)/100;
+        contrib=Math.max(0,contrib);
         newEnv['__sg_'+g.id]=contrib;
         totalSavingsTransfer=Math.round((totalSavingsTransfer+contrib)*100)/100;
         return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
