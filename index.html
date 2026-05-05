@@ -207,7 +207,9 @@ function pcsToday(){
 }
 function billsDue(){
   var t=tod();
-  return S.bills.filter(b=>b.nextDue<=t&&!isBillPaid(b.id)&&!S.disBills.includes(b.id));
+  var dueBills=S.bills.filter(b=>b.nextDue<=t&&!isBillPaid(b.id)&&!S.disBills.includes(b.id)).map(b=>({...b,_type:'bill'}));
+  var dueLoans=S.loans.filter(l=>l.nextDue&&l.nextDue<=t&&l.bal>0&&!S.disBills.includes('loan:'+l.id)).map(l=>({...l,_type:'loan',amt:l.payment||0}));
+  return dueBills.concat(dueLoans).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
 }
 
 function ttag(cat){if(!cat)return'';var c=gcat(cat),cl=co(c.color);return`<span class="tag" style="background:${cl.bg};color:${cl.c}">${c.label}</span>`}
@@ -386,22 +388,25 @@ function banners(){
     return`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}</div><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button><button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
   }
 
-  // Priority 2: Overdue/due bills
+  // Priority 2: Overdue/due bills and loans
   var due=billsDue();
   if(due.length){
     var b=due[0];
     var overdue=b.nextDue<tod();
+    var isLoan=b._type==='loan';
     return`<div style="background:var(--bg);border:1px solid ${overdue?'var(--bd-err)':'var(--bd-warn)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div>
-        <p style="font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'}">${overdue?'⚠ Overdue':'📅 Due today'} — ${b.name}</p>
-        <p style="font-size:11px;color:var(--tx2);margin-top:2px">${overdue?'Was due '+fd(b.nextDue):'Due today'} · ${fm(b.amt)}</p>
+        <p style="font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'}">${overdue?'⚠ Overdue':'📅 Due today'} — ${b.name}${isLoan?' <span style="font-size:10px;background:var(--bg2);padding:2px 6px;border-radius:4px;font-weight:400">loan</span>':''}</p>
+        <p style="font-size:11px;color:var(--tx2);margin-top:2px">${overdue?'Was due '+fd(b.nextDue):'Due today'}${b.amt>0?' · '+fm(b.amt):''}</p>
       </div>
-      ${due.length>1?`<span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${due.length} bills</span>`:''}
+      ${due.length>1?`<span style="font-size:11px;color:var(--tx2);background:var(--bg2);padding:3px 8px;border-radius:6px">${due.length} due</span>`:''}
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn" data-bill-log="${b.id}" style="flex:1;font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'};border-color:${overdue?'var(--bd-err)':'var(--bd-warn)'}">+ Log payment</button>
-      <button class="btn" data-bill-skip="${b.id}" style="font-size:13px;padding:9px 14px;color:var(--tx2)">Not yet</button>
+      ${isLoan
+        ?`<button class="btn" data-loan-due-pay="${b.id}" style="flex:1;font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'};border-color:${overdue?'var(--bd-err)':'var(--bd-warn)'}">+ Log payment</button>`
+        :`<button class="btn" data-bill-log="${b.id}" style="flex:1;font-size:13px;font-weight:500;color:${overdue?'var(--tx-err)':'var(--tx-warn)'};border-color:${overdue?'var(--bd-err)':'var(--bd-warn)'}">+ Log payment</button>`}
+      <button class="btn" data-bill-skip="${isLoan?'loan:'+b.id:b.id}" style="font-size:13px;padding:9px 14px;color:var(--tx2)">Not yet</button>
     </div>
     </div>`;
   }
@@ -860,7 +865,23 @@ function loanMgr(){
 }
 function loanForm(){
   var f=S.editLoan?S.loans.find(l=>l.id===S.editLoan)||{}:{};
-  return`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px"><p style="font-size:14px;font-weight:500;margin-bottom:12px">${S.editLoan?'Edit loan':'New loan'}</p><input class="field" id="lfName" type="text" placeholder="Loan name" value="${f.name||''}" style="margin-bottom:8px">${S.editLoan?`<div style="display:flex;gap:8px;margin-bottom:12px"><div style="flex:1"><label>Original amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" value="${f.orig||''}"></div><div style="flex:1"><label>Current balance</label><input class="field mono" id="lfBal" type="number" step="0.01" min="0" value="${f.bal||''}"></div></div>`:`<div style="margin-bottom:12px"><label>Total loan amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" placeholder="e.g. 15000.00" style="margin-top:4px"></div>`}<div style="display:flex;gap:8px"><button class="btn" id="lfSave" style="flex:1;font-weight:500">Save loan</button><button class="btn" id="lfCancel" style="flex:1">Cancel</button></div></div>`;
+  return`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px">
+  <p style="font-size:14px;font-weight:500;margin-bottom:12px">${S.editLoan?'Edit loan':'New loan'}</p>
+  <input class="field" id="lfName" type="text" placeholder="Loan name" value="${f.name||''}" style="margin-bottom:8px">
+  ${S.editLoan?`<div style="display:flex;gap:8px;margin-bottom:8px"><div style="flex:1"><label>Original amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" value="${f.orig||''}"></div><div style="flex:1"><label>Current balance</label><input class="field mono" id="lfBal" type="number" step="0.01" min="0" value="${f.bal||''}"></div></div>`:`<div style="margin-bottom:8px"><label>Total loan amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" placeholder="e.g. 15000.00" style="margin-top:4px"></div>`}
+  <div style="display:flex;gap:8px;margin-bottom:8px">
+    <div style="flex:1"><label>Regular payment</label><input class="field mono" id="lfPayment" type="number" step="0.01" min="0" placeholder="0.00" value="${f.payment||''}" style="margin-top:4px"></div>
+    <div style="flex:1"><label>Next due date</label><input class="field" id="lfNextDue" type="date" value="${f.nextDue||''}" style="margin-top:4px"></div>
+  </div>
+  <div style="margin-bottom:12px"><label>Frequency</label>
+    <select class="field" id="lfFreq" style="margin-top:4px">
+      <option value="monthly"${(f.freq||'monthly')==='monthly'?' selected':''}>Monthly</option>
+      <option value="biweekly"${f.freq==='biweekly'?' selected':''}>Biweekly</option>
+      <option value="weekly"${f.freq==='weekly'?' selected':''}>Weekly</option>
+    </select>
+  </div>
+  <div style="display:flex;gap:8px"><button class="btn" id="lfSave" style="flex:1;font-weight:500">Save loan</button><button class="btn" id="lfCancel" style="flex:1">Cancel</button></div>
+  </div>`;
 }
 function importStatementTxns(stmtTxns){
   // Build dedup set from EXISTING transactions only (not from within this batch)
@@ -1473,9 +1494,52 @@ function bind(){
   document.querySelectorAll('[data-el]').forEach(el=>el.onclick=()=>{S.editLoan=el.dataset.el;S.loanForm=true;render()});
   document.querySelectorAll('[data-dell]').forEach(el=>el.onclick=()=>{S.loans=S.loans.filter(l=>l.id!==el.dataset.dell);save();render()});
   document.querySelectorAll('[data-pl]').forEach(el=>el.onclick=()=>{S.loanPay=S.loanPay===el.dataset.pl?null:el.dataset.pl;render()});
-  var lps=g('lp-save');if(lps)lps.onclick=()=>{var lid=lps.dataset.lid,v=parseFloat(g('lp-amt').value);if(isNaN(v)||v<=0)return;var ln=(S.loans.find(l=>l.id===lid)||{name:'Loan'}).name;S.loans=S.loans.map(l=>l.id===lid?{...l,bal:Math.max(0,Math.round((l.bal-v)*100)/100)}:l);S.bal=Math.round((S.bal-v)*100)/100;S.txns=[{id:uid(),desc:ln+' payment',amt:-v,date:tod(),account:'chime',isLoanPayment:true,loanId:lid}].concat(S.txns);S.loanPay=null;save();render()};
+  document.querySelectorAll('[data-loan-due-pay]').forEach(el=>el.onclick=()=>{
+    var lid=el.dataset.loanDuePay;
+    S.loanPay=lid;S.view='home';
+    render();
+    var content=document.getElementById('content');
+    if(content)content.scrollTop=content.scrollHeight;
+    setTimeout(()=>{var a=document.getElementById('lp-amt');if(a){var loan=S.loans.find(l=>l.id===lid);if(loan&&loan.payment)a.value=loan.payment.toFixed(2);}},50);
+  });
+  var lps=g('lp-save');if(lps)lps.onclick=()=>{
+    var lid=lps.dataset.lid,v=parseFloat(g('lp-amt').value);if(isNaN(v)||v<=0)return;
+    var ln=(S.loans.find(l=>l.id===lid)||{name:'Loan'}).name;
+    S.loans=S.loans.map(l=>{
+      if(l.id!==lid)return l;
+      var updated={...l,bal:Math.max(0,Math.round((l.bal-v)*100)/100)};
+      // Advance nextDue if set
+      if(l.nextDue){
+        var nd=new Date(l.nextDue+'T00:00:00');
+        if(l.freq==='weekly')nd.setDate(nd.getDate()+7);
+        else if(l.freq==='biweekly')nd.setDate(nd.getDate()+14);
+        else{nd.setMonth(nd.getMonth()+1);}
+        updated.nextDue=nd.toISOString().slice(0,10);
+      }
+      // Clear from disBills so it shows again next cycle
+      S.disBills=S.disBills.filter(d=>d!=='loan:'+lid);
+      return updated;
+    });
+    S.bal=Math.round((S.bal-v)*100)/100;
+    S.txns=[{id:uid(),desc:ln+' payment',amt:-v,date:tod(),account:'chime',isLoanPayment:true,loanId:lid}].concat(S.txns);
+    S.loanPay=null;save();render();
+  };
   var lpc=g('lp-cancel');if(lpc)lpc.onclick=()=>{S.loanPay=null;render()};
-  var lfs=g('lfSave');if(lfs)lfs.onclick=()=>{var name=(g('lfName').value||'').trim(),orig=parseFloat(g('lfOrig').value),be=g('lfBal'),bal=be?parseFloat(be.value):orig;if(!name||isNaN(orig)||orig<=0)return;if(S.editLoan){S.loans=S.loans.map(l=>l.id===S.editLoan?{id:S.editLoan,name,orig:Math.round(orig*100)/100,bal:Math.round((isNaN(bal)?orig:bal)*100)/100}:l)}else{S.loans=S.loans.concat([{id:uid(),name,orig:Math.round(orig*100)/100,bal:Math.round(orig*100)/100}])}S.loanForm=false;S.editLoan=null;save();render()};
+  var lfs=g('lfSave');if(lfs)lfs.onclick=()=>{
+    var name=(g('lfName').value||'').trim(),orig=parseFloat(g('lfOrig').value);
+    var be=g('lfBal'),bal=be?parseFloat(be.value):orig;
+    var payment=parseFloat(g('lfPayment').value)||0;
+    var nextDue=(g('lfNextDue').value||'').trim();
+    var freq=(g('lfFreq')||{}).value||'monthly';
+    if(!name||isNaN(orig)||orig<=0)return;
+    var loanData={name,orig:Math.round(orig*100)/100,bal:Math.round((isNaN(bal)?orig:bal)*100)/100};
+    if(payment>0)loanData.payment=Math.round(payment*100)/100;
+    if(nextDue)loanData.nextDue=nextDue;
+    loanData.freq=freq;
+    if(S.editLoan){S.loans=S.loans.map(l=>l.id===S.editLoan?{...l,...loanData}:l)}
+    else{S.loans=S.loans.concat([{id:uid(),...loanData}])}
+    S.loanForm=false;S.editLoan=null;save();render();
+  };
   var lfc=g('lfCancel');if(lfc)lfc.onclick=()=>{S.loanForm=false;S.editLoan=null;render()};
 
   var abb=g('addBillBtn');if(abb)abb.onclick=()=>{S.billForm=true;S.editBill=null;render()};
