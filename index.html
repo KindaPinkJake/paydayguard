@@ -863,7 +863,7 @@ function importStatementTxns(stmtTxns){
         var loanId=remembered.replace('__loan:','');
         if(S.loans.find(l=>l.id===loanId))tx.suggestedLoanId=loanId;
       }else if(remembered&&gc().find(c=>c.id===remembered)){
-        tx.cat=remembered;
+        tx.suggestedCat=remembered;
       }else{
         var sc2=suggestCategory(desc);if(sc2)tx.suggestedCat=sc2;
       }
