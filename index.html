@@ -65,7 +65,7 @@ var S={
   billPayId:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,pendingBillLog:null,
   goalForm:false,editGoal:null,
   merchantMemory:{},
-  bulkCat:false,
+  bulkCat:false,bulkBillMkey:null,
   importView:false,importData:null,importParsing:false,importFiles:[]
 };
 
@@ -1092,8 +1092,11 @@ function historyView(){
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
         ${cats.map(c=>{var cl=co(c.color);return`<button data-bulk-assign data-mkey="${grp.mkey}" data-cat="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label} (${grp.txns.length})</button>`}).join('')}
-        <button data-bulk-bill data-mkey="${grp.mkey}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid var(--bd-warn);background:var(--bg-warn);color:var(--tx-warn)">Bill payment</button>
+        <button data-bulk-bill data-mkey="${grp.mkey}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid var(--bd-warn);background:${S.bulkBillMkey===grp.mkey?'var(--tx-warn)':'var(--bg-warn)'};color:${S.bulkBillMkey===grp.mkey?'var(--bg)':'var(--tx-warn)'}">Bill payment</button>
       </div>
+      ${S.bulkBillMkey===grp.mkey&&S.bills.length?`<div style="margin-top:10px;border-top:1px solid var(--bd);padding-top:10px"><p style="font-size:12px;color:var(--tx2);margin-bottom:6px">Which bill? Assigns all ${grp.txns.length} transactions</p><div style="display:flex;flex-direction:column;gap:6px">${S.bills.map(b=>`<button data-bulk-bill-assign data-mkey="${grp.mkey}" data-bill-id="${b.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between"><span>${b.name}</span><span class="mono" style="color:var(--tx-err)">${fm(b.amt)}</span></button>`).join('')}</div></div>`:''}
+      ${S.bulkBillMkey===grp.mkey&&!S.bills.length?`<p style="font-size:12px;color:var(--tx2);margin-top:8px">No bills set up yet — add them in the Bills & Income tab.</p>`:''}
+
     </div>`).join('')}
     ${groupArr.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">All caught up! 🎉</p>':''}
     </div></div>`;
@@ -1188,7 +1191,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.importView=false;S.importData=null;S.importFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkBillMkey=null;S.importView=false;S.importData=null;S.importFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1451,9 +1454,24 @@ function bind(){
   });
   document.querySelectorAll('[data-bulk-bill]').forEach(el=>el.onclick=()=>{
     var mkey=el.dataset.mkey;
-    var firstMatch=S.txns.find(t=>merchantKey(t.desc)===mkey&&!t.isBillPayment);
-    if(firstMatch){S.billAssignTxId=firstMatch.id;}
+    S.bulkBillMkey=S.bulkBillMkey===mkey?null:mkey; // toggle picker
     render();
+  });
+  document.querySelectorAll('[data-bulk-bill-assign]').forEach(el=>el.onclick=()=>{
+    var mkey=el.dataset.mkey,billId=el.dataset.billId;
+    var bill=S.bills.find(b=>b.id===billId);if(!bill)return;
+    if(mkey)S.merchantMemory={...S.merchantMemory,[mkey]:'__bill:'+billId};
+    var isCurrentCycle=false;
+    S.txns=S.txns.map(t=>{
+      if(merchantKey(t.desc)===mkey&&!t.isBillPayment&&!t.isLoanPayment){
+        if(t.date>=bill.nextDue)isCurrentCycle=true;
+        return{...t,isBillPayment:true,billId,suggestedBillId:undefined,cat:undefined};
+      }
+      return t;
+    });
+    if(isCurrentCycle)S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+    S.bulkBillMkey=null;
+    save();render();
   });
   var txE=g('txE');if(txE)txE.onclick=()=>{S.txType='expense';render()};
   var txI=g('txI');if(txI)txI.onclick=()=>{S.txType='income';render()};
@@ -1561,7 +1579,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,importView:false,importData:null,importParsing:false,importFiles:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,bulkBillMkey:null,importView:false,importData:null,importParsing:false,importFiles:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
