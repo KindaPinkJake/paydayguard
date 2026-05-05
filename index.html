@@ -825,25 +825,38 @@ function loanForm(){
   return`<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px"><p style="font-size:14px;font-weight:500;margin-bottom:12px">${S.editLoan?'Edit loan':'New loan'}</p><input class="field" id="lfName" type="text" placeholder="Loan name" value="${f.name||''}" style="margin-bottom:8px">${S.editLoan?`<div style="display:flex;gap:8px;margin-bottom:12px"><div style="flex:1"><label>Original amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" value="${f.orig||''}"></div><div style="flex:1"><label>Current balance</label><input class="field mono" id="lfBal" type="number" step="0.01" min="0" value="${f.bal||''}"></div></div>`:`<div style="margin-bottom:12px"><label>Total loan amount</label><input class="field mono" id="lfOrig" type="number" step="0.01" min="0" placeholder="e.g. 15000.00" style="margin-top:4px"></div>`}<div style="display:flex;gap:8px"><button class="btn" id="lfSave" style="flex:1;font-weight:500">Save loan</button><button class="btn" id="lfCancel" style="flex:1">Cancel</button></div></div>`;
 }
 function importStatementTxns(stmtTxns){
-  // Build dedup set from existing transactions (exact match + ±2 day tolerance)
-  var existing=S.txns.map(t=>({key:(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime'),t}));
+  // Build dedup set from EXISTING transactions only (not from within this batch)
+  // This allows two identical charges on the same day from the same merchant (both real)
+  var existingKeys=new Map();
+  S.txns.forEach(t=>{
+    var k=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
+    existingKeys.set(k,(existingKeys.get(k)||0)+1);
+  });
+  var usedCounts=new Map();
   var imported=[],skipped=0;
   stmtTxns.forEach(stmt=>{
     var desc=(stmt.description||'').trim();
     var amt=stmt.amount;
     var date=stmt.date;
     var acct='chime';
-    // Exact match
-    var isDupe=existing.some(e=>e.key===desc+'|'+date+'|'+amt+'|'+acct);
-    // ±2 day tolerance for settlement date differences
+    var baseKey=desc+'|'+date+'|'+amt+'|'+acct;
+    // Check exact date match with count — allows N identical charges if N exist in statement
+    var used=usedCounts.get(baseKey)||0;
+    var existing=existingKeys.get(baseKey)||0;
+    var isDupe=used<existing; // only skip if we've already imported fewer than exist
     if(!isDupe){
+      // Also check ±2 day tolerance
       for(var delta of [-1,1,-2,2]){
-        var d=new Date(date+'T00:00:00');d.setDate(d.getDate()+delta);
-        var altDate=d.toISOString().slice(0,10);
-        if(existing.some(e=>e.key===desc+'|'+altDate+'|'+amt+'|'+acct)){isDupe=true;break;}
+        var d2=new Date(date+'T00:00:00');d2.setDate(d2.getDate()+delta);
+        var altDate=d2.toISOString().slice(0,10);
+        var altKey=desc+'|'+altDate+'|'+amt+'|'+acct;
+        var altUsed=usedCounts.get(altKey)||0;
+        var altExisting=existingKeys.get(altKey)||0;
+        if(altUsed<altExisting){isDupe=true;usedCounts.set(altKey,altUsed+1);break;}
       }
     }
     if(isDupe){skipped++;return;}
+    usedCounts.set(baseKey,used+1);
     // Classify the transaction
     var tx={id:uid(),desc,amt,date,account:acct};
     if(amt>0){
@@ -867,7 +880,6 @@ function importStatementTxns(stmtTxns){
       }
     }
     imported.push(tx);
-    existing.push({key:desc+'|'+date+'|'+amt+'|'+acct,t:tx});
   });
   return{imported,skipped};
 }
