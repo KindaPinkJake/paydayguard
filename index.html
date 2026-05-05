@@ -139,16 +139,7 @@ function getPayday(){
   if(!chimeChecks.length)return'';
   return chimeChecks.map(p=>p.nextDate).sort()[0];
 }
-function deduplicateTxns(){
-  var before=S.txns.length;
-  var seen=new Set();
-  S.txns=S.txns.filter(t=>{
-    var key=(t.desc||'').trim()+'|'+t.date+'|'+t.amt+'|'+(t.account||'chime');
-    if(seen.has(key))return false;
-    seen.add(key);return true;
-  });
-  return S.txns.length<before;
-}
+function deduplicateTxns(){return false;} // No-op: dedup now handled at import time
 
 function startListener(){
   if(unsub)unsub();
@@ -1074,19 +1065,18 @@ function historyView(){
   var uncatCount=(()=>{
     var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
     var groups=new Map();
-    uncat.forEach(t=>{var k=merchantKey(t.desc)+'|'+t.amt;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(t);});
+    uncat.forEach(t=>{var k=merchantKey(t.desc);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(t);});
     return Array.from(groups.values()).filter(g=>g.length>=2).reduce((s,g)=>s+g.length,0);
   })();
 
   if(S.bulkCat){
     var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
-    // Group by normalized merchant (first 4 words, matching merchantKey) + exact amount
+    // Group by normalized merchant key only — different amounts still group together
     var groups=new Map();
     uncat.forEach(t=>{
-      var merchant=merchantKey(t.desc);
-      var key=merchant+'|'+t.amt;
-      if(!groups.has(key))groups.set(key,{merchant:t.desc,amt:t.amt,txns:[]});
-      groups.get(key).txns.push(t);
+      var mkey=merchantKey(t.desc);
+      if(!groups.has(mkey))groups.set(mkey,{merchant:t.desc,mkey,txns:[]});
+      groups.get(mkey).txns.push(t);
     });
     var groupArr=Array.from(groups.values()).filter(g=>g.txns.length>=2).sort((a,b)=>b.txns.length-a.txns.length);
     return`<div style="padding:16px 16px 0">
@@ -1101,8 +1091,8 @@ function historyView(){
         <div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err)">${fm(grp.amt)}</p><p style="font-size:11px;color:var(--tx2)">${grp.txns.length}×</p></div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
-        ${cats.map(c=>{var cl=co(c.color);return`<button data-bulk-assign data-mkey="${merchantKey(grp.merchant)}" data-amt="${grp.amt}" data-cat="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label} (${grp.txns.length})</button>`}).join('')}
-        <button data-bulk-bill data-mkey="${merchantKey(grp.merchant)}" data-amt="${grp.amt}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid var(--bd-warn);background:var(--bg-warn);color:var(--tx-warn)">Bill payment</button>
+        ${cats.map(c=>{var cl=co(c.color);return`<button data-bulk-assign data-mkey="${grp.mkey}" data-cat="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label} (${grp.txns.length})</button>`}).join('')}
+        <button data-bulk-bill data-mkey="${grp.mkey}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid var(--bd-warn);background:var(--bg-warn);color:var(--tx-warn)">Bill payment</button>
       </div>
     </div>`).join('')}
     ${groupArr.length===0?'<p style="font-size:14px;color:var(--tx2);text-align:center;padding:32px">All caught up! 🎉</p>':''}
@@ -1451,17 +1441,17 @@ function bind(){
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
   document.querySelectorAll('[data-bulk-assign]').forEach(el=>el.onclick=()=>{
-    var mkey=el.dataset.mkey,amt=parseFloat(el.dataset.amt),catId=el.dataset.cat;
+    var mkey=el.dataset.mkey,catId=el.dataset.cat;
     if(mkey)S.merchantMemory={...S.merchantMemory,[mkey]:catId};
     S.txns=S.txns.map(t=>{
-      if(merchantKey(t.desc)===mkey&&t.amt===amt&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment)return{...t,cat:catId};
+      if(merchantKey(t.desc)===mkey&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment)return{...t,cat:catId};
       return t;
     });
     save();render();
   });
   document.querySelectorAll('[data-bulk-bill]').forEach(el=>el.onclick=()=>{
-    var mkey=el.dataset.mkey,amt=parseFloat(el.dataset.amt);
-    var firstMatch=S.txns.find(t=>merchantKey(t.desc)===mkey&&t.amt===amt&&!t.isBillPayment);
+    var mkey=el.dataset.mkey;
+    var firstMatch=S.txns.find(t=>merchantKey(t.desc)===mkey&&!t.isBillPayment);
     if(firstMatch){S.billAssignTxId=firstMatch.id;}
     render();
   });
