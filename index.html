@@ -216,15 +216,11 @@ function bcard(title,bid,val){
   var confirmedDate=bid==='chime'?S.balConfirmedDate:bid==='hsa'?S.hsaConfirmedDate:null;
   var confirmed=confirmedDate===tod();
   return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:14px;padding:14px 16px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-      <div>
-        <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--tx2);margin-bottom:3px">${title}</p>
-        <p class="mono" style="font-size:24px;font-weight:600;line-height:1">${fm(val)}</p>
-      </div>
-      <div style="display:flex;gap:5px;margin-top:2px">
-        <button class="btn" id="${bid}-eb" style="font-size:11px;padding:4px 9px">Edit</button>
-        <button class="btn" id="${bid}-log" style="font-size:11px;padding:4px 9px">+ Log</button>
-      </div>
+    <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--tx2);margin-bottom:4px">${title}</p>
+    <p class="mono" style="font-size:24px;font-weight:600;line-height:1;margin-bottom:10px">${fm(val)}</p>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
+      <button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
     </div>
     <p style="font-size:10px;color:${confirmed?'var(--tx-ok)':'var(--tx-warn)'}">${confirmed?'✓ Confirmed today':'Not yet confirmed'}</p>
     <div id="${bid}-f" style="display:none;margin-top:10px;border-top:1px solid var(--bd);padding-top:10px">
@@ -513,9 +509,9 @@ function savingsCard(){
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       ${lastAmt>0?`<p style="font-size:11px;color:var(--tx2)">+${fm(lastAmt)} last paycheck</p>`:''}
       <div style="display:flex;gap:6px">
-        <button class="btn" id="savings-eb" style="font-size:11px;padding:4px 10px">Edit</button>
-        <button class="btn" id="savings-deposit-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">+ In</button>
-        <button class="btn" id="savings-withdraw-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">Out</button>
+        <button class="btn" id="savings-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
+        <button class="btn" id="savings-deposit-btn" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
+        <button class="btn" id="savings-withdraw-btn" style="font-size:12px;padding:5px 10px;flex:1">Withdraw</button>
       </div>
     </div>
   </div>
@@ -582,18 +578,16 @@ function combinedSpendCard(sf,st,up,tot){
     <p class="mono" style="font-size:42px;font-weight:700;color:${st.c};line-height:1">${fm(sf)}</p>
     <p style="font-size:12px;margin-top:6px;color:${st.c};opacity:.75">${up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income'}</p>
     ${hasBudgets?`<div style="border-top:1px solid ${st.br};margin-top:14px;padding-top:14px">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-      <svg width="52" height="52" viewBox="0 0 60 60" style="flex-shrink:0">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+      <svg width="48" height="48" viewBox="0 0 60 60" style="flex-shrink:0">
         <circle cx="30" cy="30" r="23" fill="none" stroke="var(--bd)" stroke-width="7"/>
         <circle cx="30" cy="30" r="23" fill="none" stroke="${rColor}" stroke-width="7" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" transform="rotate(-90 30 30)"/>
         <text x="30" y="27" text-anchor="middle" font-size="9" fill="var(--tx2)" font-family="system-ui">spent</text>
         <text x="30" y="39" text-anchor="middle" font-size="12" font-weight="500" fill="var(--tx)" font-family="'SF Mono',monospace">${Math.round(spentPct*100)}%</text>
       </svg>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1">
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Spent</p><p class="mono" style="font-size:14px;font-weight:600">${fm(totalSpent)}</p></div>
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Remaining</p><p class="mono" style="font-size:14px;font-weight:600;color:var(--tx-ok)">${fm(Math.max(0,totalAllocated-totalSpent))}</p></div>
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Budgeted</p><p class="mono" style="font-size:14px;font-weight:600">${fm(totalAllocated)}</p></div>
-        <div style="background:var(--bg);border-radius:8px;padding:8px 10px;opacity:.85"><p style="font-size:10px;color:var(--tx2);margin-bottom:2px">Days left</p><p class="mono" style="font-size:14px;font-weight:600">${dy!==null?dy:'--'}</p></div>
+      <div>
+        <p class="mono" style="font-size:18px;font-weight:600;opacity:.85">${fm(totalSpent)} <span style="font-size:13px;font-weight:400;color:var(--tx2)">of ${fm(totalAllocated)}</span></p>
+        <p style="font-size:12px;color:var(--tx2);margin-top:2px">${dy!==null?dy+' days left in cycle':'—'}</p>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
