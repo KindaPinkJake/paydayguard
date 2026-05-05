@@ -705,7 +705,7 @@ function txForm(){
       <option value="hsa"${S.txAcct==='hsa'?' selected':''}>HSA</option>
     </select>
   </div>
-  ${isExp?`<div style="margin-bottom:10px"><label>Category <span style="color:var(--tx-err)">*</span></label><select class="field" id="txC"><option value="">— select —</option><optgroup label="Spending">${cats.map(c=>`<option value="cat:${c.id}"${S.pendingBillLog?'':''}}>${c.label}</option>`).join('')}</optgroup>${S.bills.length?`<optgroup label="Bill payment">${S.bills.map(b=>`<option value="bill:${b.id}"${S.pendingBillLog&&S.pendingBillLog.id===b.id?' selected':''}>${b.name}</option>`).join('')}</optgroup>`:''}</select></div>`:''}
+  ${isExp?`<div style="margin-bottom:10px"><label>Category <span style="color:var(--tx-err)">*</span></label><select class="field" id="txC"><option value="">— select —</option><optgroup label="Spending">${cats.map(c=>`<option value="cat:${c.id}">${c.label}</option>`).join('')}</optgroup>${S.bills.length?`<optgroup label="Bill payment">${S.bills.map(b=>`<option value="bill:${b.id}"${S.pendingBillLog&&S.pendingBillLog.id===b.id?' selected':''}>${b.name}</option>`).join('')}</optgroup>`:''} ${S.loans.length?`<optgroup label="Loan payment">${S.loans.map(l=>`<option value="loan:${l.id}">${l.name}</option>`).join('')}</optgroup>`:''}</select></div>`:''}
   <div style="display:flex;gap:8px">
     <button class="btn" id="txS" style="flex:1;font-weight:500">Save</button>
     <button class="btn" id="txX" style="flex:1">Cancel</button>
@@ -1612,8 +1612,25 @@ function bind(){
       var bill=S.bills.find(b=>b.id===billId);
       if(bill){
         t.isBillPayment=true;t.billId=billId;
-        // Don't save bill→merchant memory: same merchant can map to multiple bills
         if(date>=bill.nextDue)S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+      }
+    }else if(catVal.startsWith('loan:')){
+      var loanId=catVal.replace('loan:','');
+      var loan=S.loans.find(l=>l.id===loanId);
+      if(loan){
+        t.isLoanPayment=true;t.loanId=loanId;
+        S.loans=S.loans.map(l=>{
+          if(l.id!==loanId)return l;
+          var updated={...l,bal:Math.max(0,Math.round((l.bal-Math.abs(fa))*100)/100)};
+          if(l.nextDue&&date>=l.nextDue){
+            var nd=new Date(l.nextDue+'T00:00:00');
+            if(l.freq==='weekly')nd.setDate(nd.getDate()+7);
+            else if(l.freq==='biweekly')nd.setDate(nd.getDate()+14);
+            else nd.setMonth(nd.getMonth()+1);
+            updated.nextDue=nd.toISOString().slice(0,10);
+          }
+          return updated;
+        });
       }
     }else if(catVal.startsWith('cat:')){
       var catId=catVal.replace('cat:','');
