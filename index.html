@@ -504,10 +504,16 @@ function savingsCard(){
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       ${lastAmt>0?`<p style="font-size:11px;color:var(--tx2)">+${fm(lastAmt)} last paycheck</p>`:''}
       <div style="display:flex;gap:6px">
+        <button class="btn" id="savings-eb" style="font-size:11px;padding:4px 10px">Edit</button>
         <button class="btn" id="savings-deposit-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">+ In</button>
         <button class="btn" id="savings-withdraw-btn" style="font-size:11px;padding:4px 10px;border-color:var(--bd-ok);color:var(--tx-ok)">Out</button>
       </div>
     </div>
+  </div>
+  <div id="savings-f" style="display:none;margin-bottom:12px;border-top:1px solid var(--bd);padding-top:12px">
+    <label>Actual savings balance</label>
+    <input class="field mono" id="savings-i" type="number" step="0.01" placeholder="Balance" style="margin-top:4px;margin-bottom:6px">
+    <button class="btn" id="savings-sb" style="width:100%;font-size:12px;padding:6px">Save</button>
   </div>
   ${S.savingsGoals.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${unallocated>0?'8':'0'}px">
     ${S.savingsGoals.map(g=>{
@@ -1340,6 +1346,8 @@ function bind(){
     S.disBills=S.disBills.concat([el.dataset.billSkip]);render();
   });
 
+  var seb=g('savings-eb');if(seb)seb.onclick=()=>{var f=g('savings-f'),i=g('savings-i');if(!f)return;var show=f.style.display!=='none';f.style.display=show?'none':'block';if(!show&&i){i.value=S.chimeSavingsBal;i.focus();}};
+  var ssb=g('savings-sb');if(ssb)ssb.onclick=()=>{var v=parseFloat(g('savings-i').value);if(!isNaN(v)){S.chimeSavingsBal=Math.round(v*100)/100;S.savingsConfirmedDate=tod();var f=g('savings-f');if(f)f.style.display='none';save();render();}};
   var sdb=g('savings-deposit-btn');if(sdb)sdb.onclick=()=>{S.showDeposit=true;S.showWithdraw=false;S.savingsDepositGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
   var swb=g('savings-withdraw-btn');if(swb)swb.onclick=()=>{S.showWithdraw=true;S.showDeposit=false;S.savingsWithdrawGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
   var bulkBtn=g('bulk-cat-btn');
