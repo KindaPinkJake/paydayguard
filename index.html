@@ -859,11 +859,7 @@ function importStatementTxns(stmtTxns){
     }else{
       var mkey=merchantKey(desc);
       var remembered=mkey?S.merchantMemory[mkey]:null;
-      if(remembered&&remembered.startsWith('__bill:')){
-        var billId=remembered.replace('__bill:','');
-        if(S.bills.find(b=>b.id===billId))tx.suggestedBillId=billId;
-        else{var sc=suggestCategory(desc);if(sc)tx.suggestedCat=sc;}
-      }else if(remembered&&remembered.startsWith('__loan:')){
+      if(remembered&&remembered.startsWith('__loan:')){
         var loanId=remembered.replace('__loan:','');
         if(S.loans.find(l=>l.id===loanId))tx.suggestedLoanId=loanId;
       }else if(remembered&&gc().find(c=>c.id===remembered)){
@@ -1266,7 +1262,7 @@ function bind(){
     var bill=S.bills.find(b=>b.id===billId);
     if(!bill)return;
     var tx=S.txns.find(t=>t.id===txId);
-    if(tx&&tx.desc){var key=merchantKey(tx.desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__bill:'+billId};}
+    // Don't save bill→merchant memory: two bills can share same merchant name (e.g. two rent payments)
     // Only advance nextDue if this transaction is for the current cycle
     // (tx date >= bill's current nextDue minus one full period, i.e. it's recent)
     var shouldAdvance=tx&&tx.date>=bill.nextDue;
@@ -1460,7 +1456,7 @@ function bind(){
   document.querySelectorAll('[data-bulk-bill-assign]').forEach(el=>el.onclick=()=>{
     var mkey=el.dataset.mkey,billId=el.dataset.billId;
     var bill=S.bills.find(b=>b.id===billId);if(!bill)return;
-    if(mkey)S.merchantMemory={...S.merchantMemory,[mkey]:'__bill:'+billId};
+    // Don't save bill→merchant memory: same merchant can map to multiple bills
     var isCurrentCycle=false;
     S.txns=S.txns.map(t=>{
       if(merchantKey(t.desc)===mkey&&!t.isBillPayment&&!t.isLoanPayment){
@@ -1490,7 +1486,7 @@ function bind(){
       var bill=S.bills.find(b=>b.id===billId);
       if(bill){
         t.isBillPayment=true;t.billId=billId;
-        var key=merchantKey(desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__bill:'+billId};
+        // Don't save bill→merchant memory: same merchant can map to multiple bills
         if(date>=bill.nextDue)S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
       }
     }else if(catVal.startsWith('cat:')){
