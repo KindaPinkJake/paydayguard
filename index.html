@@ -1088,7 +1088,7 @@ function historyView(){
     ${groupArr.map(grp=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
         <p style="font-size:14px;font-weight:500">${grp.merchant}</p>
-        <div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err)">${fm(grp.amt)}</p><p style="font-size:11px;color:var(--tx2)">${grp.txns.length}×</p></div>
+        <div style="text-align:right"><p class="mono" style="font-size:14px;font-weight:500;color:var(--tx-err)">${fm(grp.txns.reduce((s,t)=>s+t.amt,0))}</p><p style="font-size:11px;color:var(--tx2)">${grp.txns.length}×</p></div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
         ${cats.map(c=>{var cl=co(c.color);return`<button data-bulk-assign data-mkey="${grp.mkey}" data-cat="${c.id}" class="tag" style="cursor:pointer;padding:6px 12px;font-size:12px;border:1px solid ${cl.c};background:${cl.bg};color:${cl.c}">${c.label} (${grp.txns.length})</button>`}).join('')}
