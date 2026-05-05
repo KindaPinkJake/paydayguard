@@ -146,6 +146,7 @@ function startListener(){
   unsub=onSnapshot(doc(db,'users',U.uid,'data','main'),snap=>{
     if(snap.exists()){
       var d=snap.data();
+      S._dataLoaded=true;
       S.bal=d.bal||0;S.hsa=d.hsa||0;S.chimeSavingsBal=d.chimeSavingsBal||0;
       S.paychecks=d.paychecks||[];S.bills=d.bills||[];S.txns=d.txns||[];
       S.cats=d.cats||null;S.loans=d.loans||[];
@@ -164,6 +165,10 @@ function startListener(){
 }
 function save(){
   if(!U)return;
+  // Safety guard: never overwrite existing data with empty state.
+  // If we have no transactions, bills, or paychecks, but Firestore likely has data,
+  // skip the save to prevent accidents on reconnect/reload.
+  if(!S.txns.length&&!S.bills.length&&!S.paychecks.length&&!S.bal&&!S._dataLoaded)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
     try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,merchantMemory:S.merchantMemory,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate})}catch(e){console.error(e)}
