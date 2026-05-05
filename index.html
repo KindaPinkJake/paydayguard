@@ -359,7 +359,7 @@ function suggestCategory(desc){
   return null;
 }
 
-var SAVINGS_TRANSFER_KEYWORDS=['save when you spend','round up','roundup','automatic savings','savings transfer','move money','transfer to savings','transfer from savings','chime transfer','move to spending','chime savings account','to chime savings','instant loan payment'];
+var SAVINGS_TRANSFER_KEYWORDS=['save when you spend','round up','roundup','automatic savings','savings transfer','move money','transfer to savings','transfer from savings','chime transfer','move to spending','chime savings account','to chime savings'];
 
 function isSavingsTransfer(desc){
   if(!desc)return false;
@@ -914,7 +914,7 @@ function importViewHtml(){
     var files=S.importFiles||[];
     var newExpenses=d.imported.filter(t=>t.amt<0&&t.txType!=='savings_transfer');
     var newIncome=d.imported.filter(t=>t.amt>0||t.txType==='income');
-    var newSavings=d.imported.filter(t=>t.txType==='savings_transfer');
+    var newTransfers=d.imported.filter(t=>t.txType==='savings_transfer');
     return`<div style="padding:16px 16px 0">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <div><h2 style="font-size:18px;font-weight:600">Import Preview</h2><p style="font-size:12px;color:var(--tx2);margin-top:2px">${files.length} statement${files.length!==1?'s':''}</p></div>
@@ -940,6 +940,13 @@ function importViewHtml(){
     ${newIncome.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div style="background:var(--bg);border:1px solid var(--bd-ok);border-radius:8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
       <div><p style="font-size:13px">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}</p></div>
       <p class="mono" style="font-size:13px;color:var(--tx-ok)">+${fm(t.amt)}</p>
+    </div>`).join('')}
+    </div>`:''}
+    ${newTransfers.length?`<p style="font-size:12px;color:var(--tx2);font-weight:500;margin-bottom:6px">SAVINGS TRANSFERS (${newTransfers.length})</p>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+    ${newTransfers.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
+      <div><p style="font-size:13px">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}</p></div>
+      <p class="mono" style="font-size:13px;color:var(--tx2)">${fm(t.amt)}</p>
     </div>`).join('')}
     </div>`:''}
     <button class="btn" id="import-confirm-btn" style="width:100%;font-weight:500;color:var(--tx-ok);border-color:var(--bd-ok);margin-bottom:16px">Import ${d.imported.length} transaction${d.imported.length!==1?'s':''}</button>
@@ -1015,18 +1022,36 @@ async function parsePDFToText(base64){
   var binary=atob(base64),bytes=new Uint8Array(binary.length);
   for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
   var pdf=await pdfjsLib.getDocument({data:bytes}).promise;
-  var lineMap=new Map();
+  var pages=[];
   for(var p=1;p<=pdf.numPages;p++){
     var page=await pdf.getPage(p);
     var content=await page.getTextContent();
+    // Group items by y-position WITHIN this page only, then join left-to-right
+    var lineMap=new Map();
     content.items.forEach(item=>{
       if(!item.str.trim())return;
       var y=Math.round(item.transform[5]);
       if(!lineMap.has(y))lineMap.set(y,[]);
-      lineMap.get(y).push(item.str);
+      lineMap.get(y).push({x:item.transform[4],str:item.str});
     });
+    var pageText=Array.from(lineMap.keys()).sort((a,b)=>b-a).map(y=>
+      lineMap.get(y).sort((a,b)=>a.x-b.x).map(i=>i.str).join(' ')
+    ).join('\n');
+    pages.push(pageText);
   }
-  return Array.from(lineMap.keys()).sort((a,b)=>b-a).map(y=>lineMap.get(y).join(' ')).join('\n');
+  var fullText=pages.join('\n');
+  // For combined statements: only use the Combined Account Activity section
+  // Stop before "Chime Card Account Billing Statement" or "Your Payment\nPayment Due Date"
+  var stopMarkers=[
+    'Chime Card Account Billing Statement',
+    'Chime Card Secured Account Billing Statement',
+    'SpotMe Line of Credit Account Billing Statement'
+  ];
+  for(var sm of stopMarkers){
+    var idx=fullText.indexOf(sm);
+    if(idx>0)fullText=fullText.slice(0,idx);
+  }
+  return fullText;
 }
 
 function historyView(){
