@@ -61,7 +61,7 @@ var S={
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
   filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
   shareToken:null,showSharePanel:false,
-  balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,
+  balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,
   billPayId:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,pendingBillLog:null,
   goalForm:false,editGoal:null,
   merchantMemory:{},
@@ -166,6 +166,7 @@ function startListener(){
       S.balConfirmedDate=d.balConfirmedDate||null;
       S.savingsConfirmedDate=d.savingsConfirmedDate||null;
       S.hsaConfirmedDate=d.hsaConfirmedDate||null;
+      S.balSkippedDate=d.balSkippedDate||null;
     }
     render();
   },e=>console.error(e));
@@ -174,7 +175,7 @@ function save(){
   if(!U)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,merchantMemory:S.merchantMemory,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,merchantMemory:S.merchantMemory,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -369,6 +370,7 @@ function isSavingsTransfer(desc){
 
 function needsBalanceConfirm(){
   var today=tod();
+  if(S.balSkippedDate===today)return[];
   var accounts=[];
   if(S.balConfirmedDate!==today)accounts.push({key:'chime',label:'Chime',bid:'chime',val:S.bal});
   if(S.savingsConfirmedDate!==today&&(S.savingsGoals.length>0||S.chimeSavingsBal>0))accounts.push({key:'savings',label:'Chime Savings',bid:'savings',val:S.chimeSavingsBal});
@@ -1219,9 +1221,8 @@ function bind(){
     save();render();
   });
   var skipAllConfirm=g('bal-confirm-skip');if(skipAllConfirm)skipAllConfirm.onclick=()=>{
-    var today=tod();
-    S.balConfirmedDate=today;S.savingsConfirmedDate=today;S.hsaConfirmedDate=today;
-    save();render();
+    S.balSkippedDate=tod();
+    render();
   };
   function ti(eb,fb,ib,val){var e=g(eb),f=g(fb),i=g(ib);if(!e||!f)return;e.onclick=()=>{var sh=f.style.display!=='none';f.style.display=sh?'none':'block';if(!sh&&i){i.value=val;i.focus()}}}
   ti('chime-eb','chime-f','chime-i',S.bal);ti('hsa-eb','hsa-f','hsa-i',S.hsa);
@@ -1570,7 +1571,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,importView:false,importData:null,importParsing:false,importFiles:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,importView:false,importData:null,importParsing:false,importFiles:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
