@@ -1318,14 +1318,23 @@ function bind(){
       var sts=safe();
       var cats=gc(),newEnv={};
       cats.forEach(c=>{newEnv[c.id]=Math.round(sts*(c.budgetPct||0)*100)/100});
+      var totalSavingsTransfer=0;
       S.savingsGoals=S.savingsGoals.map(g=>{
         var contrib=Math.round(sts*(g.budgetPct||0)*100)/100;
         newEnv['__sg_'+g.id]=contrib;
+        totalSavingsTransfer=Math.round((totalSavingsTransfer+contrib)*100)/100;
         return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
       });
+      // Auto-transfer savings contributions: deduct from Chime, add to chimeSavingsBal
+      if(totalSavingsTransfer>0){
+        S.bal=Math.round((S.bal-totalSavingsTransfer)*100)/100;
+        S.chimeSavingsBal=Math.round((S.chimeSavingsBal+totalSavingsTransfer)*100)/100;
+        S.txns=[{id:uid(),desc:'Transfer to Chime Savings Account',amt:-totalSavingsTransfer,date:tod(),account:'chime',txType:'savings_transfer'}].concat(S.txns);
+        S.savingsConfirmedDate=tod();
+      }
       S.envelopes=newEnv;
-      if(!S.tellerSavingsAccountId){}// savings tracked per-goal now
       S.lastPaycheckDate=tod();
+      S.balConfirmedDate=tod();
     }else{
       S.hsa=Math.round((S.hsa+v)*100)/100;
     }
