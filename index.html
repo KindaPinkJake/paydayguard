@@ -779,7 +779,7 @@ function billsView(){
     </div>
     <div style="margin-top:12px;border-top:1px solid var(--bd);padding-top:10px;display:flex;justify-content:space-between;align-items:center">
       <div style="display:flex;gap:8px;align-items:center">
-        <span style="font-size:13px;color:${usedPct>1?'var(--tx-err)':'var(--tx2)'}">Total: ${Math.round(usedPct*100)}%${usedPct>1?' — over 100%!':''}</span>
+        <span style="font-size:13px;color:${usedPct>1?'var(--tx-err)':'var(--tx2)'}">Total: ${Math.round(usedPct*1000)/10}%${usedPct>1?' — over 100%!':''}</span>
         <button class="btn" id="addCatBtn" style="font-size:12px;padding:4px 10px">+ Category</button>
       </div>
       <button class="btn" id="save-budgets-btn" style="font-size:13px;padding:6px 14px;font-weight:500">Save</button>
@@ -1484,11 +1484,11 @@ function bind(){
 
   var sbb=g('save-budgets-btn');if(sbb)sbb.onclick=()=>{
     var cats=gc();
-    var updatedCats=cats.map(c=>{var inp=document.querySelector('[data-budget-cat="'+c.id+'"]');var pct=inp?parseFloat(inp.value)||0:c.budgetPct*100;return{...c,budgetPct:Math.round(pct)/100}});
-    var updatedGoals=S.savingsGoals.map(g=>{var inp=document.querySelector('[data-budget-goal="'+g.id+'"]');var pct=inp?parseFloat(inp.value)||0:(g.budgetPct||0)*100;return{...g,budgetPct:Math.round(pct)/100}});
+    var updatedCats=cats.map(c=>{var inp=document.querySelector('[data-budget-cat="'+c.id+'"]');var pct=inp?parseFloat(inp.value)||0:c.budgetPct*100;return{...c,budgetPct:Math.round(pct*10)/1000}});
+    var updatedGoals=S.savingsGoals.map(g=>{var inp=document.querySelector('[data-budget-goal="'+g.id+'"]');var pct=inp?parseFloat(inp.value)||0:(g.budgetPct||0)*100;return{...g,budgetPct:Math.round(pct*10)/1000}});
     var total=updatedCats.reduce((s,c)=>s+(c.budgetPct||0),0)+updatedGoals.reduce((s,g)=>s+(g.budgetPct||0),0);
-    var totalPctRounded=Math.round(total*100);
-    if(totalPctRounded!==100){alert('Budget percentages must add up to exactly 100%. Currently at '+totalPctRounded+'%.');return;}
+    var totalPctRounded=Math.round(total*1000)/10;
+    if(Math.abs(total-1)>0.0001){alert('Budget percentages must add up to exactly 100%. Currently at '+totalPctRounded+'%.');return;}
     S.cats=updatedCats;S.savingsGoals=updatedGoals;
     save();render();
   };
