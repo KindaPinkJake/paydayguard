@@ -11,8 +11,8 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
 <title>PaydayGuard</title>
 <style>
-:root{--bg:#ffffff;--bg2:#f3f4f6;--bg-ok:#f0fdf4;--bg-warn:#fffbeb;--bg-err:#fef2f2;--bg-info:#eff6ff;--tx:#111827;--tx2:#6b7280;--tx-ok:#15803d;--tx-warn:#92400e;--tx-err:#b91c1c;--tx-info:#1e40af;--bd:rgba(0,0,0,0.12);--bd2:rgba(0,0,0,0.22);--bd-ok:rgba(21,128,61,0.4);--bd-warn:rgba(146,64,14,0.4);--bd-err:rgba(185,28,28,0.4);}
-@media(prefers-color-scheme:dark){:root{--bg:#1c1c1e;--bg2:#111827;--bg-ok:#052e16;--bg-warn:#1c1200;--bg-err:#2d0000;--bg-info:#0c1a3a;--tx:#f9fafb;--tx2:#9ca3af;--tx-ok:#4ade80;--tx-warn:#fcd34d;--tx-err:#f87171;--tx-info:#93c5fd;--bd:rgba(255,255,255,0.12);--bd2:rgba(255,255,255,0.22);--bd-ok:rgba(74,222,128,0.35);--bd-warn:rgba(252,211,77,0.35);--bd-err:rgba(248,113,113,0.35);}}
+:root{--bg:#ffffff;--bg2:#f3f4f6;--bg-ok:#f0fdf4;--bg-warn:#fffbeb;--bg-err:#fef2f2;--bg-info:#eff6ff;--tx:#111827;--tx2:#6b7280;--tx-ok:#15803d;--tx-warn:#92400e;--tx-err:#b91c1c;--tx-info:#1e40af;--bd:rgba(0,0,0,0.12);--bd2:rgba(0,0,0,0.22);--bd-ok:rgba(21,128,61,0.4);--bd-warn:rgba(146,64,14,0.4);--bd-err:rgba(185,28,28,0.4);--bd-info:rgba(30,64,175,0.4);}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1c1e;--bg2:#111827;--bg-ok:#052e16;--bg-warn:#1c1200;--bg-err:#2d0000;--bg-info:#0c1a3a;--tx:#f9fafb;--tx2:#9ca3af;--tx-ok:#4ade80;--tx-warn:#fcd34d;--tx-err:#f87171;--tx-info:#93c5fd;--bd:rgba(255,255,255,0.12);--bd2:rgba(255,255,255,0.22);--bd-ok:rgba(74,222,128,0.35);--bd-warn:rgba(252,211,77,0.35);--bd-err:rgba(248,113,113,0.35);--bd-info:rgba(147,197,253,0.35);}}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;background:var(--bg2)}
 body{font-family:system-ui,-apple-system,sans-serif;font-size:15px;color:var(--tx)}
@@ -62,7 +62,7 @@ var S={
   filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
   shareToken:null,showSharePanel:false,
   balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,
-  billPayId:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,pendingBillLog:null,
+  billAssignTxId:null,editTx:null,pendingBillLog:null,
   goalForm:false,editGoal:null,editGoalAmt:null,
   merchantMemory:{},
   bulkCat:false,bulkBillMkey:null,
@@ -106,10 +106,12 @@ function isBillPaid(billId){
 }
 function savingsRate(){
   if(!S.lastPaycheckDate)return null;
-  var income=S.txns.filter(t=>t.txType==='income'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+t.amt,0);
-  var expenses=S.txns.filter(t=>t.amt<0&&t.date>=S.lastPaycheckDate&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.account!=='chimeSavings').reduce((s,t)=>s+Math.abs(t.amt),0);
+  var income=S.txns.filter(t=>t.txType==='income'&&t.account==='chime'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+t.amt,0);
   if(income<=0)return null;
-  return Math.max(0,Math.round((1-expenses/income)*100));
+  // Savings = money deliberately moved to savings (auto-transfer from paycheck + manual deposits)
+  var saved=S.txns.filter(t=>t.txType==='savings_transfer'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+Math.abs(t.amt),0)
+    +S.txns.filter(t=>t.txType==='savings_deposit'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+Math.abs(t.amt),0);
+  return Math.max(0,Math.round(saved/income*100));
 }
 function paycheckHistory(){
   var pcWords=S.paychecks.filter(p=>p.account==='chime').flatMap(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
@@ -218,7 +220,11 @@ function ttag(cat){if(!cat)return'';var c=gcat(cat),cl=co(c.color);return`<span 
 function swatch(k,sel){var cl=co(k);return`<button type="button" data-swatch="${k}" style="width:32px;height:32px;border-radius:50%;background:${cl.bg};border:${sel?'3px solid '+cl.c:'1px solid var(--bd)'};cursor:pointer;flex-shrink:0"></button>`}
 function bcard(title,bid,val){
   var confirmedDate=bid==='chime'?S.balConfirmedDate:bid==='hsa'?S.hsaConfirmedDate:null;
-  var confirmed=confirmedDate===tod();
+  var today=tod();
+  var confirmed=confirmedDate===today;
+  var staleDays=confirmedDate?Math.round((new Date(today+'T00:00:00')-new Date(confirmedDate+'T00:00:00'))/86400000):null;
+  var staleLabel=confirmed?'✓ Confirmed today':staleDays===1?'Last confirmed yesterday':staleDays!==null&&staleDays>0?`Last confirmed ${staleDays} days ago`:'Not yet confirmed';
+  var staleColor=confirmed?'var(--tx-ok)':staleDays!==null&&staleDays>3?'var(--tx-err)':staleDays!==null&&staleDays>1?'var(--tx-warn)':'var(--tx-warn)';
   return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:14px;padding:14px 16px">
     <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--tx2);margin-bottom:4px">${title}</p>
     <p class="mono" style="font-size:24px;font-weight:600;line-height:1;margin-bottom:10px">${fm(val)}</p>
@@ -226,7 +232,7 @@ function bcard(title,bid,val){
       <button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
       <button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
     </div>
-    <p style="font-size:10px;color:${confirmed?'var(--tx-ok)':'var(--tx-warn)'}">${confirmed?'✓ Confirmed today':'Not yet confirmed'}</p>
+    <p style="font-size:10px;color:${staleColor}">${staleLabel}</p>
     <div id="${bid}-f" style="display:none;margin-top:10px;border-top:1px solid var(--bd);padding-top:10px">
       <input class="field mono" id="${bid}-i" type="number" step="0.01" placeholder="New balance" style="margin-bottom:6px">
       <button class="btn" id="${bid}-sb" style="width:100%;font-size:12px;padding:6px">Save</button>
@@ -236,7 +242,7 @@ function bcard(title,bid,val){
 
 function sharedView(d){
   // Reconstruct state-like object from snapshot for rendering
-  var cats=(d.cats||[{id:'food',label:'Food & Dining',color:'warning',budgetPct:0},{id:'gas',label:'Gas & Transport',color:'info',budgetPct:0},{id:'entertain',label:'Entertainment',color:'success',budgetPct:0},{id:'health',label:'Health & Medical',color:'danger',budgetPct:0},{id:'other',label:'Other',color:'secondary',budgetPct:0}]).map(c=>({budgetPct:0,...c}));
+  var cats=(d.cats||DEFCATS).map(c=>({budgetPct:0,...c}));
   var paychecks=d.paychecks||[];
   // derive payday
   var chimeChecks=paychecks.filter(p=>p.account==='chime'&&p.nextDate);
@@ -423,7 +429,7 @@ function banners(){
         <button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button>
       </div>
       ${allAllocs.length?`<div style="border-top:1px solid var(--bd-ok);padding-top:10px">
-        <p style="font-size:11px;color:var(--tx-ok);margin-bottom:8px">Proposed allocations from ${fm(previewSts)} safe to spend — edit below, last savings goal adjusts automatically</p>
+        <p style="font-size:11px;color:var(--tx-ok);margin-bottom:8px" class="pc-sts-val" data-sts="${previewSts}">Proposed allocations from ${fm(previewSts)} safe to spend — edit below, last savings goal adjusts automatically</p>
         <div style="display:flex;flex-direction:column;gap:6px">
           ${allAllocs.map((a,idx)=>`<div style="display:flex;align-items:center;gap:8px">
             <p style="font-size:13px;flex:1;color:var(--tx)">${a.label}${a.isGoal?` <span style="font-size:10px;color:var(--tx-ok)">savings</span>`:''}</p>
@@ -431,8 +437,9 @@ function banners(){
           </div>`).join('')}
           <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--bd-ok);padding-top:6px;margin-top:2px">
             <p style="font-size:11px;color:var(--tx2)">Total</p>
-            <p class="mono" style="font-size:13px;font-weight:600;color:var(--tx-ok)">${fm(previewSts)}</p>
+            <p class="mono pc-alloc-total" style="font-size:13px;font-weight:600;color:var(--tx-ok)">${fm(previewSts)}</p>
           </div>
+          <p class="pc-alloc-warning" style="display:none;font-size:11px;color:var(--tx-err);margin-top:6px"></p>
         </div>
       </div>`:''}
     </div>`;
@@ -652,7 +659,7 @@ function loansHome(){
   return`<div style="margin-bottom:10px"><p style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;color:var(--tx2);margin-bottom:8px">Loans</p><div style="display:flex;flex-direction:column;gap:6px">${cards}</div></div>`;
 }
 
-function combinedSpendCard(sf,st,up,tot){
+function combinedSpendCard(sf,up,tot){
   var cats=gc();
   var totalAllocated=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
   var totalSpent=cats.reduce((s,c)=>s+spentSince(c.id),0);
@@ -709,7 +716,7 @@ function combinedSpendCard(sf,st,up,tot){
 
 function homeView(){
   var pd=getPayday();
-  var sf=safe(),lv=showLevel(sf),st=ls(lv),dy=days();
+  var sf=safe(),dy=days();
   var up=upcoming(),tot=up.reduce((s,b)=>s+b.amt,0);
   var sr=savingsRate();
   return`<div style="padding:16px 16px 80px">
@@ -742,7 +749,7 @@ function homeView(){
   </div>`:''}
 
   ${/* Safe to spend — hero */''}
-  ${combinedSpendCard(sf,st,up,tot)}
+  ${combinedSpendCard(sf,up,tot)}
 
   ${/* Due before payday */''}
   ${up.length?`<div style="margin-bottom:10px">
@@ -1279,6 +1286,27 @@ function historyView(){
       <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
     </div>
   </div>
+  ${(()=>{
+    var keys=Object.keys(S.merchantMemory||{});
+    if(!keys.length)return'';
+    var cats=gc();
+    return`<div style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <p style="font-size:12px;font-weight:500;color:var(--tx2);text-transform:uppercase;letter-spacing:.06em">Merchant memory</p>
+      <button class="btn" id="clear-memory-btn" style="font-size:11px;padding:3px 8px;color:var(--tx-err);min-height:0">Clear all</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      ${keys.map(k=>{
+        var val=S.merchantMemory[k];
+        var label=val&&val.startsWith('__loan:')?'Loan payment':cats.find(c=>c.id===val)?.label||val;
+        return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:7px 12px">
+          <div><p style="font-size:13px">${k}</p><p style="font-size:11px;color:var(--tx2)">→ ${label}</p></div>
+          <button class="btn" data-del-memory="${k}" style="font-size:11px;padding:3px 8px;color:var(--tx-err);min-height:0">✕</button>
+        </div>`;
+      }).join('')}
+    </div>
+    </div>`;
+  })()}
   ${S.txForm?txForm():''}
   <div style="margin-bottom:10px;display:flex;flex-direction:column;gap:8px">
     <div style="display:flex;gap:8px">
@@ -1570,7 +1598,6 @@ function bind(){
   });
   var sdb=g('savings-deposit-btn');if(sdb)sdb.onclick=()=>{S.showDeposit=true;S.showWithdraw=false;S.savingsDepositGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
   var swb=g('savings-withdraw-btn');if(swb)swb.onclick=()=>{S.showWithdraw=true;S.showDeposit=false;S.savingsWithdrawGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
-  var bulkBtn=g('bulk-cat-btn');
   document.querySelectorAll('[data-deposit-goal]').forEach(el=>el.onclick=()=>{S.savingsDepositGoalId=el.dataset.depositGoal;render()});
   document.querySelectorAll('[data-withdraw-goal]').forEach(el=>el.onclick=()=>{S.savingsWithdrawGoalId=el.dataset.withdrawGoal;render()});
   var asSave=g('savings-amt-save');if(asSave)asSave.onclick=()=>{
@@ -1714,11 +1741,12 @@ function bind(){
   var cs=g('catSave');if(cs)cs.onclick=()=>{var name=(g('catName').value||'').trim(),color=g('catColor').value||'warning';if(!name)return;var cats=gc();if(S.editCat){cats=cats.map(c=>c.id===S.editCat?{...c,label:name,color}:c)}else{cats=cats.concat([{id:uid(),label:name,color,budgetPct:0}])}S.cats=cats;S.catForm=false;S.editCat=null;save();render()};
   var cc=g('catCancel');if(cc)cc.onclick=()=>{S.catForm=false;S.editCat=null;render()};
 
-  function ttf(){S.txForm=!S.txForm;render()}
   var importBackBtn=g('import-back-btn');if(importBackBtn)importBackBtn.onclick=()=>{S.importView=false;S.importData=null;S.importFiles=[];render()};
   var importUploadBtn=g('import-upload-btn');if(importUploadBtn)importUploadBtn.onclick=()=>g('import-pdf-input').click();
   var importUploadMoreBtn=g('import-upload-more-btn');if(importUploadMoreBtn)importUploadMoreBtn.onclick=()=>g('import-pdf-input').click();
   var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
+  var clearMemBtn=g('clear-memory-btn');if(clearMemBtn)clearMemBtn.onclick=()=>{if(!confirm('Clear all merchant memory? Future imports won\'t have suggestions until you re-categorize.'))return;S.merchantMemory={};save();render();};
+  document.querySelectorAll('[data-del-memory]').forEach(el=>el.onclick=()=>{var k=el.dataset.delMemory;var m={...S.merchantMemory};delete m[k];S.merchantMemory=m;save();render();});
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
@@ -1752,7 +1780,64 @@ function bind(){
     S.bulkBillMkey=null;
     save();render();
   });
-  var txE=g('txE');if(txE)txE.onclick=()=>{S.txType='expense';render()};
+  // Live allocation editing in paycheck banner
+  var pcAmtInp=document.querySelector('[id^="pc-ca-"]');
+  var allocInps=document.querySelectorAll('.pc-alloc-inp');
+  var totalEl=document.querySelector('.pc-alloc-total');
+
+  function updateAllocTotal(){
+    var sum=0;
+    allocInps.forEach((inp,i)=>{
+      var isLast=i===allocInps.length-1;
+      if(!isLast)sum=Math.round((sum+(parseFloat(inp.value)||0))*100)/100;
+    });
+    var stsEl=document.querySelector('.pc-sts-val');
+    var sts=stsEl?parseFloat(stsEl.dataset.sts)||0:0;
+    var lastVal=Math.round((sts-sum)*100)/100;
+    var lastInp=allocInps[allocInps.length-1];
+    var warning=document.querySelector('.pc-alloc-warning');
+    if(lastInp){
+      if(lastVal<0){
+        lastInp.value='0.00';
+        if(warning){warning.style.display='block';warning.textContent='Allocations exceed safe to spend by '+fm(Math.abs(lastVal))+' — reduce other amounts.';}
+      }else{
+        lastInp.value=lastVal.toFixed(2);
+        if(warning)warning.style.display='none';
+      }
+    }
+    var newTotal=Math.round((sum+Math.max(0,lastVal))*100)/100;
+    if(totalEl)totalEl.textContent=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(newTotal);
+  }
+
+  function recalcAllocsFromAmt(){
+    if(!pcAmtInp||!allocInps.length)return;
+    var newAmt=parseFloat(pcAmtInp.value)||0;
+    // Recalculate STS: (bal + newAmt) - upcoming bills with advanced payday
+    var pid=pcAmtInp.id.replace('pc-ca-','');
+    var p=S.paychecks.find(x=>x.id===pid);if(!p)return;
+    var nextPd=advPc(p);
+    var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(nextPd+'T00:00:00');
+    var upAmt=S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd;}).reduce((s,b)=>s+b.amt,0)
+      +S.loans.filter(l=>l.nextDue&&l.payment>0&&l.bal>0).filter(l=>{var d=new Date(l.nextDue+'T00:00:00');return d>=now&&d<=pdd;}).reduce((s,l)=>s+l.payment,0);
+    var newSts=Math.max(0,Math.round((S.bal+newAmt-upAmt)*100)/100);
+    // Update sts reference
+    var stsEl=document.querySelector('.pc-sts-val');
+    if(stsEl){stsEl.dataset.sts=newSts;stsEl.textContent='Proposed allocations from '+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(newSts)+' safe to spend — edit below, last savings goal adjusts automatically';}
+    // Redistribute all allocations proportionally
+    var cats=gc();var allocated=0;var allAllocs=[];
+    cats.filter(c=>c.budgetPct>0).forEach(c=>{var amt=Math.round(newSts*(c.budgetPct||0)*100)/100;allAllocs.push({isGoal:false,pct:c.budgetPct,amt});allocated=Math.round((allocated+amt)*100)/100;});
+    S.savingsGoals.forEach((g,idx,arr)=>{var isLast=idx===arr.length-1;var amt=isLast?Math.round((newSts-allocated)*100)/100:Math.round(newSts*(g.budgetPct||0)*100)/100;if(!isLast)allocated=Math.round((allocated+amt)*100)/100;amt=Math.max(0,amt);allAllocs.push({isGoal:true,isLast,amt});});
+    allocInps.forEach((inp,i)=>{if(allAllocs[i])inp.value=(allAllocs[i].amt||0).toFixed(2);});
+    if(totalEl)totalEl.textContent=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(newSts);
+  }
+
+  if(pcAmtInp)pcAmtInp.oninput=recalcAllocsFromAmt;
+  allocInps.forEach((inp,i)=>{
+    var isLast=i===allocInps.length-1;
+    if(!isLast)inp.oninput=updateAllocTotal;
+    // last input is read-only display
+    if(isLast){inp.style.background='var(--bg2)';inp.readOnly=true;}
+  });
   var txI=g('txI');if(txI)txI.onclick=()=>{S.txType='income';render()};
   var txAs=g('txAcctSel');if(txAs)txAs.onchange=()=>{S.txAcct=txAs.value};
   var txS=g('txS');if(txS)txS.onclick=()=>{
@@ -1887,7 +1972,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,loanAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,bulkBillMkey:null,importView:false,importData:null,importParsing:false,importFiles:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,bulkBillMkey:null,importView:false,importData:null,importParsing:false,importFiles:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
