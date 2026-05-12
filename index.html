@@ -387,7 +387,55 @@ function banners(){
   var pcs=pcsToday();
   if(pcs.length){
     var p=pcs[0];
-    return`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}</div><div style="display:flex;gap:8px;align-items:center"><input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)"><button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button><button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button></div></div>`;
+    // Calculate proposed allocations based on the input amount
+    var cats=gc();
+    var inputAmt=p.amt; // use stored amount for preview; live calculation happens on apply
+    // Simulate safe-to-spend for preview: (current bal + paycheck) - upcoming after paycheck
+    var previewBal=Math.round((S.bal+inputAmt)*100)/100;
+    // Temporarily compute upcoming with next paycheck date
+    var nextPd=advPc(p);
+    var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(nextPd+'T00:00:00');
+    var upAmt=S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd;}).reduce((s,b)=>s+b.amt,0)
+      +S.loans.filter(l=>l.nextDue&&l.payment>0&&l.bal>0).filter(l=>{var d=new Date(l.nextDue+'T00:00:00');return d>=now&&d<=pdd;}).reduce((s,l)=>s+l.payment,0);
+    var previewSts=Math.max(0,Math.round((previewBal-upAmt)*100)/100);
+    var allocated=0;
+    var catAllocs=cats.filter(c=>c.budgetPct>0).map(c=>{
+      var amt=Math.round(previewSts*(c.budgetPct||0)*100)/100;
+      allocated=Math.round((allocated+amt)*100)/100;
+      return{id:c.id,label:c.label,amt};
+    });
+    var goalAllocs=S.savingsGoals.map((g,idx,arr)=>{
+      var isLast=idx===arr.length-1;
+      var amt=isLast?Math.round((previewSts-allocated)*100)/100:Math.round(previewSts*(g.budgetPct||0)*100)/100;
+      if(!isLast)allocated=Math.round((allocated+amt)*100)/100;
+      amt=Math.max(0,amt);
+      return{id:g.id,label:g.name,amt,isGoal:true};
+    });
+    var allAllocs=[...catAllocs,...goalAllocs];
+
+    return`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:${allAllocs.length?'12':'0'}px">
+        <input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)">
+        <button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button>
+        <button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button>
+      </div>
+      ${allAllocs.length?`<div style="border-top:1px solid var(--bd-ok);padding-top:10px">
+        <p style="font-size:11px;color:var(--tx-ok);margin-bottom:8px">Proposed allocations from ${fm(previewSts)} safe to spend — edit below, last savings goal adjusts automatically</p>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${allAllocs.map((a,idx)=>`<div style="display:flex;align-items:center;gap:8px">
+            <p style="font-size:13px;flex:1;color:var(--tx)">${a.label}${a.isGoal?` <span style="font-size:10px;color:var(--tx-ok)">savings</span>`:''}</p>
+            <input class="field mono pc-alloc-inp" data-alloc-id="${a.id}" data-alloc-goal="${a.isGoal||false}" data-alloc-idx="${idx}" type="number" step="0.01" value="${a.amt}" style="width:90px;text-align:right;padding:5px 8px;font-size:13px;background:var(--bg)">
+          </div>`).join('')}
+          <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--bd-ok);padding-top:6px;margin-top:2px">
+            <p style="font-size:11px;color:var(--tx2)">Total</p>
+            <p class="mono" style="font-size:13px;font-weight:600;color:var(--tx-ok)">${fm(previewSts)}</p>
+          </div>
+        </div>
+      </div>`:''}
+    </div>`;
   }
 
   // Priority 2: Overdue/due bills and loans
@@ -572,6 +620,7 @@ function combinedSpendCard(sf,st,up,tot){
   var cats=gc();
   var totalAllocated=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
   var totalSpent=cats.reduce((s,c)=>s+spentSince(c.id),0);
+  var totalRemaining=Math.max(0,totalAllocated-totalSpent);
   var spentPct=totalAllocated>0?Math.min(1,totalSpent/totalAllocated):0;
   var circ=144.51,offset=Math.round(circ*(1-spentPct));
   var rColor=ringColor(spentPct);
@@ -579,12 +628,17 @@ function combinedSpendCard(sf,st,up,tot){
   var pd=getPayday();
   var prev=prevCycleStart();
   var hasBudgets=budgetsConfigured()&&pd;
+  // Hero: show remaining envelope budget when budgets are configured (tracks spending accurately)
+  // Fall back to bank-based safe-to-spend when no budgets set up yet
+  var heroAmt=hasBudgets?totalRemaining:sf;
+  var heroLevel=hasBudgets?(totalRemaining<20?'danger':totalRemaining<100?'warning':'safe'):showLevel(sf);
+  var heroSt=ls(heroLevel);
 
-  return`<div style="border-radius:14px;padding:18px;margin-bottom:10px;border:1px solid ${st.br};background:${st.bg}">
-    <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:${st.c};margin-bottom:4px">Safe to spend</p>
-    <p class="mono" style="font-size:42px;font-weight:700;color:${st.c};line-height:1">${fm(sf)}</p>
-    <p style="font-size:12px;margin-top:6px;color:${st.c};opacity:.75">${up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income'}</p>
-    ${hasBudgets?`<div style="border-top:1px solid ${st.br};margin-top:14px;padding-top:14px">
+  return`<div style="border-radius:14px;padding:18px;margin-bottom:10px;border:1px solid ${heroSt.br};background:${heroSt.bg}">
+    <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:${heroSt.c};margin-bottom:4px">Safe to spend</p>
+    <p class="mono" style="font-size:42px;font-weight:700;color:${heroSt.c};line-height:1">${fm(heroAmt)}</p>
+    <p style="font-size:12px;margin-top:6px;color:${heroSt.c};opacity:.75">${hasBudgets?fm(totalSpent)+' spent of '+fm(totalAllocated)+' budget':(up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income')}</p>
+    ${hasBudgets?`<div style="border-top:1px solid ${heroSt.br};margin-top:14px;padding-top:14px">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
       <svg width="48" height="48" viewBox="0 0 60 60" style="flex-shrink:0">
         <circle cx="30" cy="30" r="23" fill="none" stroke="var(--bd)" stroke-width="7"/>
@@ -678,7 +732,8 @@ function homeView(){
     <p class="mono" style="font-size:16px;font-weight:600;color:${sr>=20?'var(--tx-ok)':sr>=10?'var(--tx-warn)':'var(--tx-err)'}">${sr}%</p>
   </div>`:''}
 
-  ${/* Loans */''}
+  ${/* Loan payment form */''}
+  ${S.loanPay?loansHome():''}
 
   ${/* Tx form */''}
   ${S.txForm?txForm():''}
@@ -744,7 +799,7 @@ function billsView(){
         <div style="display:flex;align-items:center;gap:8px">
           <div style="width:8px;height:8px;border-radius:50%;background:${cl.c};flex-shrink:0"></div>
           <span style="font-size:13px;flex:1">${c.label}</span>
-          <input class="field mono" type="number" min="0" max="100" step="1" value="${Math.round((c.budgetPct||0)*100)}" data-budget-cat="${c.id}" style="width:56px;text-align:right;padding:6px 8px">
+          <input class="field mono" type="number" min="0" max="100" step="0.1" value="${(c.budgetPct||0)*100}" data-budget-cat="${c.id}" style="width:56px;text-align:right;padding:6px 8px">
           <span style="font-size:13px;color:var(--tx2)">%</span>
           <button class="btn" data-ec="${c.id}" style="font-size:11px;padding:4px 8px;color:var(--tx2);min-height:0">Edit</button>
           <button class="btn" data-delc="${c.id}" style="font-size:11px;padding:4px 8px;color:var(--tx-err);min-height:0">✕</button>
@@ -764,7 +819,7 @@ function billsView(){
     ${S.savingsGoals.map(g=>`<div style="display:flex;align-items:center;gap:8px;padding-left:16px">
       <div style="width:6px;height:6px;border-radius:50%;background:var(--tx-ok);flex-shrink:0"></div>
       <span style="font-size:13px;flex:1">${g.name}</span>
-      <input class="field mono" type="number" min="0" max="100" step="1" value="${Math.round((g.budgetPct||0)*100)}" data-budget-goal="${g.id}" style="width:56px;text-align:right;padding:6px 8px">
+      <input class="field mono" type="number" min="0" max="100" step="0.1" value="${(g.budgetPct||0)*100}" data-budget-goal="${g.id}" style="width:56px;text-align:right;padding:6px 8px">
       <span style="font-size:13px;color:var(--tx2)">%</span>
       <div style="width:60px"></div>
     </div>`).join('')}
@@ -1134,7 +1189,7 @@ function historyView(){
   })();
 
   if(S.bulkCat){
-    var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
+    var uncat=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal'&&t.account!=='chimeSavings');
     // Group by normalized merchant key only — different amounts still group together
     var groups=new Map();
     uncat.forEach(t=>{
@@ -1339,7 +1394,7 @@ function bind(){
       var mKey=merchantKey(tx.desc);
       var firstDone=false;
       S.txns=S.txns.map(t=>{
-        if(merchantKey(t.desc)===mKey&&t.amt===tx.amt&&!t.isBillPayment){
+        if(merchantKey(t.desc)===mKey&&!t.isBillPayment){
           if(!firstDone&&shouldAdvance){firstDone=true;S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);}
           return{...t,desc:bill.name+' payment',isBillPayment:true,billId,suggestedBillId:undefined};
         }
@@ -1368,29 +1423,57 @@ function bind(){
     if(isNaN(v)||v<=0)return;
     if(p.account==='chime'){
       S.bal=Math.round((S.bal+v)*100)/100;
-      // Advance nextDate FIRST so getPayday() returns the next payday,
-      // which lets upcoming() correctly find bills due before that date
+      // Advance nextDate FIRST so getPayday() returns the next payday
       S.paychecks=S.paychecks.map(x=>x.id===pid?{...x,nextDate:advPc(x)}:x);
       var sts=safe();
       var cats=gc(),newEnv={};
       var allocated=0;
-      cats.forEach(c=>{var amt=Math.round(sts*(c.budgetPct||0)*100)/100;newEnv[c.id]=amt;allocated=Math.round((allocated+amt)*100)/100;});
-      var totalSavingsTransfer=0;
-      S.savingsGoals=S.savingsGoals.map((g,idx,arr)=>{
-        var isLast=idx===arr.length-1;
-        var contrib=isLast?Math.round((sts-allocated)*100)/100:Math.round(sts*(g.budgetPct||0)*100)/100;
-        if(!isLast)allocated=Math.round((allocated+contrib)*100)/100;
-        contrib=Math.max(0,contrib);
-        newEnv['__sg_'+g.id]=contrib;
-        totalSavingsTransfer=Math.round((totalSavingsTransfer+contrib)*100)/100;
-        return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
-      });
-      // Auto-transfer savings contributions: deduct from Chime, add to chimeSavingsBal
-      if(totalSavingsTransfer>0){
-        S.bal=Math.round((S.bal-totalSavingsTransfer)*100)/100;
-        S.chimeSavingsBal=Math.round((S.chimeSavingsBal+totalSavingsTransfer)*100)/100;
-        S.txns=[{id:uid(),desc:'Transfer to Chime Savings Account',amt:-totalSavingsTransfer,date:tod(),account:'chime',txType:'savings_transfer'}].concat(S.txns);
-        S.savingsConfirmedDate=tod();
+      // Read edited allocation inputs if present, else use percentage defaults
+      var allocInputs=document.querySelectorAll('.pc-alloc-inp');
+      var hasCustom=allocInputs.length>0;
+      if(hasCustom){
+        // Use user-edited values; last savings goal gets the remainder
+        cats.forEach(c=>{
+          var inp2=document.querySelector('[data-alloc-id="'+c.id+'"][data-alloc-goal="false"]');
+          var amt=inp2?Math.max(0,parseFloat(inp2.value)||0):Math.round(sts*(c.budgetPct||0)*100)/100;
+          newEnv[c.id]=amt;allocated=Math.round((allocated+amt)*100)/100;
+        });
+        var totalSavingsTransfer=0;
+        S.savingsGoals=S.savingsGoals.map((g,idx,arr)=>{
+          var isLast=idx===arr.length-1;
+          var inp3=document.querySelector('[data-alloc-id="'+g.id+'"][data-alloc-goal="true"]');
+          var contrib=isLast?Math.round((sts-allocated)*100)/100:(inp3?Math.max(0,parseFloat(inp3.value)||0):Math.round(sts*(g.budgetPct||0)*100)/100);
+          if(!isLast)allocated=Math.round((allocated+contrib)*100)/100;
+          contrib=Math.max(0,contrib);
+          newEnv['__sg_'+g.id]=contrib;
+          totalSavingsTransfer=Math.round((totalSavingsTransfer+contrib)*100)/100;
+          return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
+        });
+        if(totalSavingsTransfer>0){
+          S.bal=Math.round((S.bal-totalSavingsTransfer)*100)/100;
+          S.chimeSavingsBal=Math.round((S.chimeSavingsBal+totalSavingsTransfer)*100)/100;
+          S.txns=[{id:uid(),desc:'Transfer to Chime Savings Account',amt:-totalSavingsTransfer,date:tod(),account:'chime',txType:'savings_transfer'}].concat(S.txns);
+          S.savingsConfirmedDate=tod();
+        }
+      }else{
+        // No inputs visible — use percentage defaults
+        cats.forEach(c=>{var amt=Math.round(sts*(c.budgetPct||0)*100)/100;newEnv[c.id]=amt;allocated=Math.round((allocated+amt)*100)/100;});
+        var totalSavingsTransfer=0;
+        S.savingsGoals=S.savingsGoals.map((g,idx,arr)=>{
+          var isLast=idx===arr.length-1;
+          var contrib=isLast?Math.round((sts-allocated)*100)/100:Math.round(sts*(g.budgetPct||0)*100)/100;
+          if(!isLast)allocated=Math.round((allocated+contrib)*100)/100;
+          contrib=Math.max(0,contrib);
+          newEnv['__sg_'+g.id]=contrib;
+          totalSavingsTransfer=Math.round((totalSavingsTransfer+contrib)*100)/100;
+          return{...g,allocated:Math.round((g.allocated+contrib)*100)/100};
+        });
+        if(totalSavingsTransfer>0){
+          S.bal=Math.round((S.bal-totalSavingsTransfer)*100)/100;
+          S.chimeSavingsBal=Math.round((S.chimeSavingsBal+totalSavingsTransfer)*100)/100;
+          S.txns=[{id:uid(),desc:'Transfer to Chime Savings Account',amt:-totalSavingsTransfer,date:tod(),account:'chime',txType:'savings_transfer'}].concat(S.txns);
+          S.savingsConfirmedDate=tod();
+        }
       }
       S.envelopes=newEnv;
       S.lastPaycheckDate=tod();
