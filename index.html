@@ -1368,6 +1368,9 @@ function bind(){
     if(isNaN(v)||v<=0)return;
     if(p.account==='chime'){
       S.bal=Math.round((S.bal+v)*100)/100;
+      // Advance nextDate FIRST so getPayday() returns the next payday,
+      // which lets upcoming() correctly find bills due before that date
+      S.paychecks=S.paychecks.map(x=>x.id===pid?{...x,nextDate:advPc(x)}:x);
       var sts=safe();
       var cats=gc(),newEnv={};
       var allocated=0;
@@ -1396,7 +1399,6 @@ function bind(){
       S.hsa=Math.round((S.hsa+v)*100)/100;
     }
     S.txns=[{id:uid(),desc:p.name,amt:v,date:tod(),account:p.account,txType:'income'}].concat(S.txns);
-    S.paychecks=S.paychecks.map(x=>x.id===pid?{...x,nextDate:advPc(x)}:x);
     S.disPcs=S.disPcs.concat([pid]);save();render();
   });
   document.querySelectorAll('[data-pc-skip]').forEach(el=>el.onclick=()=>{S.disPcs=S.disPcs.concat([el.dataset.pcSkip]);render()});
