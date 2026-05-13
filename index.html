@@ -198,8 +198,16 @@ function upcoming(){
   var pd=getPayday();
   if(!pd)return[];
   var now=new Date();now.setHours(0,0,0,0);var pdd=new Date(pd+'T00:00:00');
-  var upBills=S.bills.filter(b=>{var d=new Date(b.nextDue+'T00:00:00');return d>=now&&d<=pdd}).map(b=>({...b,_type:'bill'}));
-  var upLoans=S.loans.filter(l=>l.nextDue&&l.payment>0&&l.bal>0).filter(l=>{var d=new Date(l.nextDue+'T00:00:00');return d>=now&&d<=pdd}).map(l=>({...l,_type:'loan',amt:l.payment}));
+  var since=S.lastPaycheckDate||tod();
+  var upBills=S.bills.filter(b=>{
+    var d=new Date(b.nextDue+'T00:00:00');
+    return d>=now&&d<=pdd&&!isBillPaid(b.id);
+  }).map(b=>({...b,_type:'bill'}));
+  var upLoans=S.loans.filter(l=>l.nextDue&&l.payment>0&&l.bal>0).filter(l=>{
+    var d=new Date(l.nextDue+'T00:00:00');
+    var paid=S.txns.some(t=>t.isLoanPayment&&t.loanId===l.id&&t.date>=since);
+    return d>=now&&d<=pdd&&!paid;
+  }).map(l=>({...l,_type:'loan',amt:l.payment}));
   return upBills.concat(upLoans).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
 }
 function safe(){return S.bal-upcoming().reduce((s,b)=>s+b.amt,0)}
