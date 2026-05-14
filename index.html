@@ -427,13 +427,17 @@ function banners(){
     });
     var allAllocs=[...catAllocs,...goalAllocs];
 
+    var alreadyApplied=S.txns.some(t=>t.txType==='income'&&t.account===p.account&&t.date===tod()&&Math.abs(t.amt-p.amt)<1);
     return`<div style="background:var(--bg-ok);border:1px solid var(--bd-ok);border-radius:12px;padding:14px 16px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <p style="font-size:13px;font-weight:500;color:var(--tx-ok)">Payday — ${p.name}</p>${acctTag(p.account)}
       </div>
+      ${alreadyApplied?`<div style="background:var(--bg-warn);border:1px solid var(--bd-warn);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+        <p style="font-size:12px;color:var(--tx-warn)">⚠ This paycheck looks like it was already applied today. Applying again will create duplicate savings transfers and throw off your balance. Check History before continuing.</p>
+      </div>`:''}
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:${allAllocs.length?'12':'0'}px">
         <input class="field mono" id="pc-ca-${p.id}" type="number" step="0.01" value="${p.amt}" style="flex:1;background:var(--bg)">
-        <button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:var(--tx-ok);border-color:var(--bd-ok)">Apply</button>
+        <button class="btn" data-pc-apply="${p.id}" style="white-space:nowrap;color:${alreadyApplied?'var(--tx-warn)':'var(--tx-ok)'};border-color:${alreadyApplied?'var(--bd-warn)':'var(--bd-ok)'}${alreadyApplied?'' : ''}">${alreadyApplied?'Apply anyway':'Apply'}</button>
         <button class="btn" data-pc-skip="${p.id}" style="font-size:12px;padding:9px 10px;color:var(--tx2)">Skip</button>
       </div>
       ${allAllocs.length?`<div style="border-top:1px solid var(--bd-ok);padding-top:10px">
@@ -669,38 +673,21 @@ function loansHome(){
 
 function combinedSpendCard(sf,up,tot){
   var cats=gc();
-  var totalAllocated=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
-  var totalSpent=cats.reduce((s,c)=>s+spentSince(c.id),0);
-  var totalRemaining=Math.max(0,totalAllocated-totalSpent);
-  var spentPct=totalAllocated>0?Math.min(1,totalSpent/totalAllocated):0;
-  var circ=144.51,offset=Math.round(circ*(1-spentPct));
-  var rColor=ringColor(spentPct);
   var dy=days();
   var pd=getPayday();
   var prev=prevCycleStart();
   var hasBudgets=budgetsConfigured()&&pd;
-  // Hero: show remaining envelope budget when budgets are configured (tracks spending accurately)
-  // Fall back to bank-based safe-to-spend when no budgets set up yet
-  var heroAmt=hasBudgets?totalRemaining:sf;
-  var heroLevel=hasBudgets?(totalRemaining<20?'danger':totalRemaining<100?'warning':'safe'):showLevel(sf);
+  var heroLevel=showLevel(sf);
   var heroSt=ls(heroLevel);
 
   return`<div style="border-radius:14px;padding:18px;margin-bottom:10px;border:1px solid ${heroSt.br};background:${heroSt.bg}">
     <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:${heroSt.c};margin-bottom:4px">Safe to spend</p>
-    <p class="mono" style="font-size:42px;font-weight:700;color:${heroSt.c};line-height:1">${fm(heroAmt)}</p>
-    <p style="font-size:12px;margin-top:6px;color:${heroSt.c};opacity:.75">${hasBudgets?fm(totalSpent)+' spent of '+fm(totalAllocated)+' budget':(up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income')}</p>
+    <p class="mono" style="font-size:42px;font-weight:700;color:${heroSt.c};line-height:1">${fm(sf)}</p>
+    <p style="font-size:12px;margin-top:6px;color:${heroSt.c};opacity:.75">${up.length?'after '+fm(tot)+' in upcoming bills':pd?'no bills due before payday':'add a Chime paycheck in Bills &amp; Income'}</p>
     ${hasBudgets?`<div style="border-top:1px solid ${heroSt.br};margin-top:14px;padding-top:14px">
-    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-      <svg width="48" height="48" viewBox="0 0 60 60" style="flex-shrink:0">
-        <circle cx="30" cy="30" r="23" fill="none" stroke="var(--bd)" stroke-width="7"/>
-        <circle cx="30" cy="30" r="23" fill="none" stroke="${rColor}" stroke-width="7" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" transform="rotate(-90 30 30)"/>
-        <text x="30" y="27" text-anchor="middle" font-size="9" fill="var(--tx2)" font-family="system-ui">spent</text>
-        <text x="30" y="39" text-anchor="middle" font-size="12" font-weight="500" fill="var(--tx)" font-family="'SF Mono',monospace">${Math.round(spentPct*100)}%</text>
-      </svg>
-      <div>
-        <p class="mono" style="font-size:18px;font-weight:600;opacity:.85">${fm(totalSpent)} <span style="font-size:13px;font-weight:400;color:var(--tx2)">of ${fm(totalAllocated)}</span></p>
-        <p style="font-size:12px;color:var(--tx2);margin-top:2px">${dy!==null?dy+' days left in cycle':'—'}</p>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+      <p style="font-size:12px;color:${heroSt.c};opacity:.75">Budget remaining by category</p>
+      <p style="font-size:12px;color:${heroSt.c};opacity:.75">${dy!==null?dy+' days left':''}</p>
     </div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
     ${cats.filter(c=>c.budgetPct>0).map(c=>{
@@ -1274,8 +1261,9 @@ function historyView(){
 
   var txns=S.txns;
   // Hide savings transfer transactions by default — only show when filtering Chime Savings
-  var showSavings=S.filtAcct==='chimeSavings';
+  var showSavings=S.filtAcct!=='hsa';
   if(!showSavings) txns=txns.filter(t=>t.txType!=='savings_transfer'&&t.txType!=='savings_deposit'&&t.txType!=='savings_withdrawal');
+  if(S.filtAcct==='chimeSavings') txns=txns.filter(t=>t.txType==='savings_transfer'||t.txType==='savings_deposit'||t.txType==='savings_withdrawal');
   // Account filter
   if(S.filtAcct&&S.filtAcct!=='all') txns=txns.filter(t=>(t.account||'chime')===S.filtAcct);
   // Date filter
@@ -1755,6 +1743,7 @@ function bind(){
   var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
   var clearMemBtn=g('clear-memory-btn');if(clearMemBtn)clearMemBtn.onclick=()=>{if(!confirm('Clear all merchant memory? Future imports won\'t have suggestions until you re-categorize.'))return;S.merchantMemory={};save();render();};
   document.querySelectorAll('[data-del-memory]').forEach(el=>el.onclick=()=>{var k=el.dataset.delMemory;var m={...S.merchantMemory};delete m[k];S.merchantMemory=m;save();render();});
+  var txBtn2=g('txBtn2');if(txBtn2)txBtn2.onclick=()=>{S.view='home';S.txForm=true;S.txType='expense';S.txAcct='chime';render();setTimeout(()=>{var c=document.getElementById('content');if(c)c.scrollTop=c.scrollHeight;},50);};
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
