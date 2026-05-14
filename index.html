@@ -539,7 +539,6 @@ function savingsCard(){
   if(!showCard)return'';
   var totalAllocated=S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
   var unallocated=Math.round((savBal-totalAllocated)*100)/100;
-  var lastAmt=S.savingsGoals.reduce((s,g)=>{var contrib=S.envelopes['__sg_'+g.id]||0;return s+contrib},0);
   var confirmedLabel=S.savingsConfirmedDate?`<p style="font-size:10px;color:var(--tx2);margin-top:2px">Confirmed ${fd(S.savingsConfirmedDate)}</p>`:'<p style="font-size:10px;color:var(--tx-warn);margin-top:2px">Not yet confirmed</p>';
   var depositForm=S.showDeposit?`<div style="margin-top:12px;border-top:1px solid var(--bd-ok);padding-top:12px">
     <label>Transfer amount (Chime → Savings)</label>
@@ -581,7 +580,6 @@ function savingsCard(){
       ${confirmedLabel}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-      ${lastAmt>0?`<p style="font-size:11px;color:var(--tx2)">+${fm(lastAmt)} last paycheck</p>`:''}
       <div style="display:flex;gap:6px">
         <button class="btn" id="savings-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
         <button class="btn" id="savings-deposit-btn" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
@@ -597,7 +595,6 @@ function savingsCard(){
   ${S.savingsGoals.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${unallocated>0?'8':'0'}px">
     ${S.savingsGoals.map(g=>{
       var pct=g.target>0?Math.min(1,g.allocated/g.target):0;
-      var contrib=S.envelopes['__sg_'+g.id]||0;
       var isEditing=S.editGoalAmt===g.id;
       return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${isEditing?'8':'4'}px">
@@ -605,7 +602,6 @@ function savingsCard(){
           <div style="display:flex;align-items:center;gap:8px">
             ${!isEditing?`<div style="text-align:right">
               <p class="mono" style="font-size:13px;color:var(--tx-ok)">${fm(g.allocated)}${g.target?` / ${fm(g.target)}`:''}</p>
-              ${contrib>0?`<p style="font-size:10px;color:var(--tx2)">+${fm(contrib)} last paycheck</p>`:''}
             </div>`:''}
             <button class="btn" data-edit-goal-amt="${g.id}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx2)">${isEditing?'Cancel':'Edit'}</button>
           </div>
@@ -713,7 +709,6 @@ function homeView(){
   var pd=getPayday();
   var sf=safe(),dy=days();
   var up=upcoming(),tot=up.reduce((s,b)=>s+b.amt,0);
-  var sr=savingsRate();
   return`<div style="padding:16px 16px 80px">
 
   ${/* Header */''}
@@ -763,12 +758,6 @@ function homeView(){
 
   ${/* Savings */''}
   ${savingsCard()}
-
-  ${/* Savings rate */''}
-  ${sr!==null?`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:11px 14px;margin-bottom:10px">
-    <p style="font-size:13px;color:var(--tx2)">Savings rate this cycle</p>
-    <p class="mono" style="font-size:16px;font-weight:600;color:${sr>=20?'var(--tx-ok)':sr>=10?'var(--tx-warn)':'var(--tx-err)'}">${sr}%</p>
-  </div>`:''}
 
   ${/* Loan payment form */''}
   ${S.loanPay?loansHome():''}
@@ -1543,7 +1532,11 @@ function bind(){
       S.hsa=Math.round((S.hsa+v)*100)/100;
     }
     S.txns=[{id:uid(),desc:p.name,amt:v,date:tod(),account:p.account,txType:'income'}].concat(S.txns);
-    S.disPcs=S.disPcs.concat([pid]);save();render();
+    S.disPcs=S.disPcs.concat([pid]);
+    // Save immediately (no debounce) so nextDate persists before any reload
+    clearTimeout(T);
+    setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,merchantMemory:S.merchantMemory,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate}).catch(e=>console.error(e));
+    render();
   });
   document.querySelectorAll('[data-pc-skip]').forEach(el=>el.onclick=()=>{S.disPcs=S.disPcs.concat([el.dataset.pcSkip]);render()});
   document.querySelectorAll('[data-bill-log]').forEach(el=>el.onclick=()=>{
