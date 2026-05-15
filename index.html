@@ -70,6 +70,7 @@ var S={
 };
 
 var _prevEnvelopes=null; // undo buffer for rebalance, session-only
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
 
 // Rescale envelope allocations so sum(remaining) always equals safe-to-spend.
 // Called whenever Chime balance changes to keep the invariant true.
