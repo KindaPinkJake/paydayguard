@@ -707,7 +707,7 @@ function combinedSpendCard(sf,up,tot){
           <input id="env-inp-${c.id}" class="field mono" type="number" step="0.01" value="${alloc.toFixed(2)}" style="font-size:13px;padding:4px 8px;flex:1">
           <button data-env-save="${c.id}" class="btn" style="font-size:11px;padding:4px 8px;min-height:0;color:var(--tx-ok);border-color:var(--bd-ok)">✓</button>
         </div>`:`<p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>`}
-        <div style="height:4px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:7px"><div style="height:100%;border-radius:4px;background:${bC};width:100%"></div></div>
+        <div style="height:4px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:7px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(Math.min(1,spPct)*100)}%"></div></div>
         <p style="font-size:10px;color:var(--tx2);margin-top:4px">of ${fm(alloc)}</p>
         ${trendHtml}
       </div>`;
@@ -1774,15 +1774,14 @@ function bind(){
     var inp=document.getElementById('env-inp-'+cid);
     var v=parseFloat(inp?inp.value:0);
     if(isNaN(v)||v<0)return;
-    var newEnv={...S.envelopes,[cid]:Math.round(v*100)/100};
     var cats=gc();
-    var newTotal=cats.filter(c=>c.budgetPct>0).reduce((s,c)=>s+(newEnv[c.id]||0),0);
-    var sf=safe();
-    if(Math.abs(newTotal-sf)>0.01){
-      alert('Category budgets must add up to safe to spend ('+fm(sf)+'). Currently at '+fm(newTotal)+'.');
+    var currentTotal=cats.filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
+    var newTotal=currentTotal-(S.envelopes[cid]||0)+Math.round(v*100)/100;
+    if(Math.abs(newTotal-currentTotal)>0.01){
+      alert('Changing this to '+fm(v)+' makes the total '+fm(newTotal)+' instead of '+fm(currentTotal)+'.\nAdjust another category first to make room, then come back to this one.');
       return;
     }
-    S.envelopes=newEnv;
+    S.envelopes={...S.envelopes,[cid]:Math.round(v*100)/100};
     S._editEnvCat=null;save();render();
   });
   document.querySelectorAll('[data-rebalance-to]').forEach(el=>el.onclick=()=>{
