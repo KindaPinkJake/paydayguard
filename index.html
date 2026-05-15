@@ -69,7 +69,7 @@ var S={
   importView:false,importData:null,importParsing:false,importFiles:[]
 };
 
-function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
+var _prevEnvelopes=null; // undo buffer for rebalance, session-only
 function tod(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function fm(n){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n)}
 function fd(s){if(!s)return'';var d=new Date(s+'T00:00:00');return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}
@@ -697,8 +697,16 @@ function combinedSpendCard(sf,up,tot){
       var trendHtml='';
       if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<p style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-top:2px">${diff<0?'↓':'↑'} ${pct}% vs last</p>`;}
       return`<div style="background:var(--bg);border-radius:10px;padding:11px 13px;border:1px solid ${over?'var(--bd-err)':'transparent'}" ${over?`data-rebalance-from="${c.id}"`:''}>
-        <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px"><div style="width:6px;height:6px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2);font-weight:500">${c.label}</p>${over?`<span style="font-size:9px;font-weight:600;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}</div>
-        <p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+          <div style="width:6px;height:6px;border-radius:50%;background:${dotC};flex-shrink:0"></div>
+          <p style="font-size:11px;color:var(--tx2);font-weight:500;flex:1">${c.label}</p>
+          ${over?`<span style="font-size:9px;font-weight:600;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}
+          <button data-env-edit="${c.id}" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--tx2);padding:0 2px">✎</button>
+        </div>
+        ${S._editEnvCat===c.id?`<div style="display:flex;gap:4px;margin-bottom:4px">
+          <input id="env-inp-${c.id}" class="field mono" type="number" step="0.01" value="${alloc.toFixed(2)}" style="font-size:13px;padding:4px 8px;flex:1">
+          <button data-env-save="${c.id}" class="btn" style="font-size:11px;padding:4px 8px;min-height:0;color:var(--tx-ok);border-color:var(--bd-ok)">✓</button>
+        </div>`:`<p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>`}
         <div style="height:4px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:7px"><div style="height:100%;border-radius:4px;background:${bC};width:100%"></div></div>
         <p style="font-size:10px;color:var(--tx2);margin-top:4px">of ${fm(alloc)}</p>
         ${trendHtml}
@@ -712,7 +720,10 @@ function combinedSpendCard(sf,up,tot){
       var hasSurplus=cats.filter(c=>c.budgetPct>0&&(S.envelopes[c.id]||0)-spentSince(c.id)>0);
       if(!hasSurplus.length)return`<div style="margin-top:10px;padding:10px 12px;background:var(--bg-err);border-radius:8px;border:1px solid var(--bd-err)"><p style="font-size:12px;color:var(--tx-err)">⚠ You're ${fm(totalOver)} over budget with no surplus to cover it.</p></div>`;
       return`<div style="margin-top:10px;padding:12px;background:var(--bg-warn);border-radius:8px;border:1px solid var(--bd-warn)">
-        <p style="font-size:12px;font-weight:600;color:var(--tx-warn);margin-bottom:8px">⚠ ${fm(totalOver)} over budget — cover it by reducing another category:</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <p style="font-size:12px;font-weight:600;color:var(--tx-warn)">⚠ ${fm(totalOver)} over budget — cover from:</p>
+          ${_prevEnvelopes?`<button id="rebalance-undo-btn" class="btn" style="font-size:11px;padding:3px 10px;min-height:0;color:var(--tx-warn);border-color:var(--bd-warn)">Undo</button>`:''}
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           ${hasSurplus.map(c=>{var rem=(S.envelopes[c.id]||0)-spentSince(c.id);return`<button data-rebalance-to="${c.id}" data-rebalance-amt="${Math.min(rem,totalOver).toFixed(2)}" class="btn" style="font-size:12px;padding:5px 10px;color:var(--tx-warn);border-color:var(--bd-warn)">${c.label} (${fm(rem)} left)</button>`;}).join('')}
         </div>
@@ -1753,10 +1764,32 @@ function bind(){
   var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
   var clearMemBtn=g('clear-memory-btn');if(clearMemBtn)clearMemBtn.onclick=()=>{if(!confirm('Clear all merchant memory? Future imports won\'t have suggestions until you re-categorize.'))return;S.merchantMemory={};save();render();};
   document.querySelectorAll('[data-del-memory]').forEach(el=>el.onclick=()=>{var k=el.dataset.delMemory;var m={...S.merchantMemory};delete m[k];S.merchantMemory=m;save();render();});
+  document.querySelectorAll('[data-env-edit]').forEach(el=>el.onclick=()=>{
+    S._editEnvCat=S._editEnvCat===el.dataset.envEdit?null:el.dataset.envEdit;
+    render();
+    if(S._editEnvCat){setTimeout(()=>{var inp=document.getElementById('env-inp-'+S._editEnvCat);if(inp){inp.focus();inp.select();}},50);}
+  });
+  document.querySelectorAll('[data-env-save]').forEach(el=>el.onclick=()=>{
+    var cid=el.dataset.envSave;
+    var inp=document.getElementById('env-inp-'+cid);
+    var v=parseFloat(inp?inp.value:0);
+    if(isNaN(v)||v<0)return;
+    var newEnv={...S.envelopes,[cid]:Math.round(v*100)/100};
+    var cats=gc();
+    var newTotal=cats.filter(c=>c.budgetPct>0).reduce((s,c)=>s+(newEnv[c.id]||0),0);
+    var sf=safe();
+    if(Math.abs(newTotal-sf)>0.01){
+      alert('Category budgets must add up to safe to spend ('+fm(sf)+'). Currently at '+fm(newTotal)+'.');
+      return;
+    }
+    S.envelopes=newEnv;
+    S._editEnvCat=null;save();render();
+  });
   document.querySelectorAll('[data-rebalance-to]').forEach(el=>el.onclick=()=>{
     var toCatId=el.dataset.rebalanceTo;
     var newEnv={...S.envelopes};
     var cats=gc();
+    _prevEnvelopes={...S.envelopes}; // store for undo
     cats.filter(c=>c.budgetPct>0).forEach(c=>{
       var rem=(newEnv[c.id]||0)-spentSince(c.id);
       if(rem<0){
@@ -1769,6 +1802,9 @@ function bind(){
     });
     S.envelopes=newEnv;save();render();
   });
+  var undoBtn=g('rebalance-undo-btn');if(undoBtn)undoBtn.onclick=()=>{
+    if(_prevEnvelopes){S.envelopes=_prevEnvelopes;_prevEnvelopes=null;save();render();}
+  };
   var txBtn2=g('txBtn2');if(txBtn2)txBtn2.onclick=()=>{S.view='home';S.txForm=true;S.txType='expense';S.txAcct='chime';render();setTimeout(()=>{var c=document.getElementById('content');if(c)c.scrollTop=c.scrollHeight;},50);};
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
