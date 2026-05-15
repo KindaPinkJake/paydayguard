@@ -729,7 +729,7 @@ function combinedSpendCard(sf,up,tot){
         </div>
       </div>`;
     })()}
-    </div></div>`:''}
+    </div>`:''}
   </div>`;
 }
 
@@ -1772,16 +1772,33 @@ function bind(){
   document.querySelectorAll('[data-env-save]').forEach(el=>el.onclick=()=>{
     var cid=el.dataset.envSave;
     var inp=document.getElementById('env-inp-'+cid);
-    var v=parseFloat(inp?inp.value:0);
+    var v=Math.round((parseFloat(inp?inp.value:0)||0)*100)/100;
     if(isNaN(v)||v<0)return;
-    var cats=gc();
-    var currentTotal=cats.filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
-    var newTotal=currentTotal-(S.envelopes[cid]||0)+Math.round(v*100)/100;
-    if(Math.abs(newTotal-currentTotal)>0.01){
-      alert('Changing this to '+fm(v)+' makes the total '+fm(newTotal)+' instead of '+fm(currentTotal)+'.\nAdjust another category first to make room, then come back to this one.');
-      return;
+    var cats=gc().filter(c=>c.budgetPct>0);
+    var sf=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0); // total pool = current envelope sum
+    var diff=Math.round((v-(S.envelopes[cid]||0))*100)/100; // how much this category changed
+    if(Math.abs(diff)<0.01){S._editEnvCat=null;render();return;}
+    // Find other categories to absorb the difference (sorted by most surplus first)
+    var others=cats.filter(c=>c.id!==cid).sort((a,b)=>{
+      var remA=(S.envelopes[a.id]||0)-spentSince(a.id);
+      var remB=(S.envelopes[b.id]||0)-spentSince(b.id);
+      return diff>0?remB-remA:remA-remB; // take from most surplus if increasing, add to most surplus if decreasing
+    });
+    var newEnv={...S.envelopes,[cid]:v};
+    var remaining=diff;
+    for(var i=0;i<others.length&&Math.abs(remaining)>0.01;i++){
+      var oc=others[i];
+      var cur=newEnv[oc.id]||0;
+      var adjust=Math.min(Math.abs(remaining),Math.max(0,cur))*Math.sign(remaining)*-1;
+      adjust=Math.round(adjust*100)/100;
+      newEnv[oc.id]=Math.round((cur+adjust)*100)/100;
+      remaining=Math.round((remaining+adjust)*100)/100;
     }
-    S.envelopes={...S.envelopes,[cid]:Math.round(v*100)/100};
+    // If still can't balance (all others at 0), clamp the edited value
+    if(Math.abs(remaining)>0.01){
+      newEnv[cid]=Math.round((v-remaining)*100)/100;
+    }
+    S.envelopes=newEnv;
     S._editEnvCat=null;save();render();
   });
   document.querySelectorAll('[data-rebalance-to]').forEach(el=>el.onclick=()=>{
