@@ -70,6 +70,31 @@ var S={
 };
 
 var _prevEnvelopes=null; // undo buffer for rebalance, session-only
+
+// Rescale envelope allocations so sum(remaining) always equals safe-to-spend.
+// Called whenever Chime balance changes to keep the invariant true.
+function rescaleEnvelopes(){
+  if(!S.lastPaycheckDate)return;
+  var cats=gc().filter(c=>c.budgetPct>0);
+  if(!cats.length)return;
+  var sts=safe();
+  var sumSpent=cats.reduce((s,c)=>s+spentSince(c.id),0);
+  var targetTotal=Math.round((sts+sumSpent)*100)/100;
+  var currentTotal=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
+  if(!currentTotal||Math.abs(targetTotal-currentTotal)<0.02)return;
+  var newEnv={...S.envelopes};
+  cats.forEach(c=>{
+    newEnv[c.id]=Math.max(spentSince(c.id),Math.round((S.envelopes[c.id]||0)/currentTotal*targetTotal*100)/100);
+  });
+  // Fix rounding on largest to ensure exact total
+  var newTotal=cats.reduce((s,c)=>s+(newEnv[c.id]||0),0);
+  var rem=Math.round((targetTotal-newTotal)*100)/100;
+  if(Math.abs(rem)>0.005){
+    var largest=cats.slice().sort((a,b)=>(newEnv[b.id]||0)-(newEnv[a.id]||0))[0];
+    if(largest)newEnv[largest.id]=Math.round(((newEnv[largest.id]||0)+rem)*100)/100;
+  }
+  S.envelopes=newEnv;
+}
 function tod(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function fm(n){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n)}
 function fd(s){if(!s)return'';var d=new Date(s+'T00:00:00');return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}
@@ -161,6 +186,8 @@ function startListener(){
       S.savingsConfirmedDate=d.savingsConfirmedDate||null;
       S.hsaConfirmedDate=d.hsaConfirmedDate||null;
       S.balSkippedDate=d.balSkippedDate||null;
+      // Enforce invariant: sum(remaining) must always equal safe-to-spend
+      rescaleEnvelopes();
     }
     render();
   },e=>console.error(e));
@@ -1400,12 +1427,12 @@ function bind(){
     var inp=g('bal-conf-inp-'+key);
     var v=inp&&inp.value!==''?parseFloat(inp.value):null;
     if(v!==null&&!isNaN(v)){
-      if(key==='chime')S.bal=Math.round(v*100)/100;
+      if(key==='chime'){S.bal=Math.round(v*100)/100;}
       else if(key==='savings')S.chimeSavingsBal=Math.round(v*100)/100;
       else if(key==='hsa')S.hsa=Math.round(v*100)/100;
     }
     var today=tod();
-    if(key==='chime')S.balConfirmedDate=today;
+    if(key==='chime'){S.balConfirmedDate=today;rescaleEnvelopes();}
     else if(key==='savings')S.savingsConfirmedDate=today;
     else if(key==='hsa')S.hsaConfirmedDate=today;
     save();render();
@@ -1416,7 +1443,7 @@ function bind(){
   };
   function ti(eb,fb,ib,val){var e=g(eb),f=g(fb),i=g(ib);if(!e||!f)return;e.onclick=()=>{var sh=f.style.display!=='none';f.style.display=sh?'none':'block';if(!sh&&i){i.value=val;i.focus()}}}
   ti('chime-eb','chime-f','chime-i',S.bal);ti('hsa-eb','hsa-f','hsa-i',S.hsa);
-  var csb=g('chime-sb');if(csb)csb.onclick=()=>{var v=parseFloat(g('chime-i').value);if(!isNaN(v)){S.bal=Math.round(v*100)/100;S.balConfirmedDate=tod();save();render()}};
+  var csb=g('chime-sb');if(csb)csb.onclick=()=>{var v=parseFloat(g('chime-i').value);if(!isNaN(v)){S.bal=Math.round(v*100)/100;S.balConfirmedDate=tod();rescaleEnvelopes();save();render()}};
   var hsb=g('hsa-sb');if(hsb)hsb.onclick=()=>{var v=parseFloat(g('hsa-i').value);if(!isNaN(v)){S.hsa=Math.round(v*100)/100;S.hsaConfirmedDate=tod();save();render()}};
   var clb=g('chime-log');if(clb)clb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='chime';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
   var hlb=g('hsa-log');if(hlb)hlb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='hsa';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
@@ -1634,7 +1661,7 @@ function bind(){
       var wdName=wdGoalId&&wdGoalId!=='__unallocated'?(S.savingsGoals.find(g=>g.id===wdGoalId)||{name:''}).name:'';
       S.txns=[{id:uid(),desc:'Transfer from savings'+(wdName?' \u2014 '+wdName:''),amt:v,date:tod(),account:'chime',txType:'savings_withdrawal'}].concat(S.txns);
     }
-    S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;S.savingsConfirmedDate=tod();save();render();
+    S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;S.savingsConfirmedDate=tod();rescaleEnvelopes();save();render();
   };
   var asCancel=g('savings-amt-cancel');if(asCancel)asCancel.onclick=()=>{S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;render()};
 
