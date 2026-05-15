@@ -63,7 +63,7 @@ var S={
   shareToken:null,showSharePanel:false,
   balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,
   billAssignTxId:null,editTx:null,pendingBillLog:null,
-  goalForm:false,editGoal:null,editGoalAmt:null,
+  goalForm:false,editGoal:null,editGoalAmt:null,_editEnvOpen:false,
   merchantMemory:{},
   bulkCat:false,bulkBillMkey:null,
   importView:false,importData:null,importParsing:false,importFiles:[]
@@ -713,7 +713,7 @@ function combinedSpendCard(sf,up,tot){
       <p style="font-size:12px;color:${heroSt.c};opacity:.75">Budget remaining by category</p>
       <p style="font-size:12px;color:${heroSt.c};opacity:.75">${dy!==null?dy+' days left':''}</p>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+    <div style="display:flex;flex-direction:column;gap:8px">
     ${cats.filter(c=>c.budgetPct>0).map(c=>{
       var alloc=S.envelopes[c.id]||0,spent=spentSince(c.id),rem=alloc-spent;
       var over=rem<0;
@@ -723,24 +723,48 @@ function combinedSpendCard(sf,up,tot){
       var bC=over?'var(--tx-err)':barColor(spent,alloc);
       var prevSpent=prev?spentBetween(c.id,prev,S.lastPaycheckDate):null;
       var trendHtml='';
-      if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<p style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-top:2px">${diff<0?'↓':'↑'} ${pct}% vs last</p>`;}
-      return`<div style="background:var(--bg);border-radius:10px;padding:11px 13px;border:1px solid ${over?'var(--bd-err)':'transparent'}" ${over?`data-rebalance-from="${c.id}"`:''}>
-        <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
-          <div style="width:6px;height:6px;border-radius:50%;background:${dotC};flex-shrink:0"></div>
-          <p style="font-size:11px;color:var(--tx2);font-weight:500;flex:1">${c.label}</p>
-          ${over?`<span style="font-size:9px;font-weight:600;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}
-          <button data-env-edit="${c.id}" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--tx2);padding:0 2px">✎</button>
+      if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<span style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-left:8px">${diff<0?'↓':'↑'} ${pct}% vs last</span>`;}
+      return`<div style="background:var(--bg);border-radius:10px;padding:12px 14px;border:1px solid ${over?'var(--bd-err)':'transparent'}" ${over?`data-rebalance-from="${c.id}"`:''}>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:8px;height:8px;border-radius:50%;background:${dotC};flex-shrink:0"></div>
+            <p style="font-size:13px;font-weight:500">${c.label}</p>
+            ${over?`<span style="font-size:9px;font-weight:600;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}
+            ${trendHtml}
+          </div>
+          <div style="text-align:right">
+            <p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>
+            <p style="font-size:10px;color:var(--tx2);margin-top:1px">of ${fm(alloc)}</p>
+          </div>
         </div>
-        ${S._editEnvCat===c.id?`<div style="display:flex;gap:4px;margin-bottom:4px">
-          <input id="env-inp-${c.id}" class="field mono" type="number" step="0.01" value="${alloc.toFixed(2)}" style="font-size:13px;padding:4px 8px;flex:1">
-          <button data-env-save="${c.id}" class="btn" style="font-size:11px;padding:4px 8px;min-height:0;color:var(--tx-ok);border-color:var(--bd-ok)">✓</button>
-        </div>`:`<p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>`}
-        <div style="height:4px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:7px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(Math.min(1,spPct)*100)}%"></div></div>
-        <p style="font-size:10px;color:var(--tx2);margin-top:4px">of ${fm(alloc)}</p>
-        ${trendHtml}
+        <div style="height:5px;border-radius:4px;background:var(--bg2);overflow:hidden"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(Math.min(1,spPct)*100)}%"></div></div>
       </div>`;
     }).join('')}
     </div>
+    ${S._editEnvOpen?`<div style="margin-top:10px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--bd)">
+      <p style="font-size:12px;font-weight:600;color:var(--tx2);margin-bottom:10px">Edit allocations — last category adjusts automatically</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${cats.filter(c=>c.budgetPct>0).map((c,idx,arr)=>{
+          var isLast=idx===arr.length-1;
+          var alloc=S.envelopes[c.id]||0;
+          return`<div style="display:flex;align-items:center;gap:8px">
+            <div style="width:8px;height:8px;border-radius:50%;background:${co(c.color).c};flex-shrink:0"></div>
+            <p style="font-size:13px;flex:1">${c.label}</p>
+            <input class="field mono env-alloc-inp" data-env-cat="${c.id}" data-env-last="${isLast}" type="number" step="0.01" value="${alloc.toFixed(2)}" style="width:100px;text-align:right;padding:5px 8px;font-size:13px${isLast?';background:var(--bg2)':''}" ${isLast?'readonly':''}>
+          </div>`;
+        }).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--bd);padding-top:8px;margin-top:2px">
+          <p style="font-size:11px;color:var(--tx2)">Total</p>
+          <p class="mono env-alloc-total" style="font-size:13px;font-weight:600">${fm(cats.filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0))}</p>
+        </div>
+        <p class="env-alloc-warning" style="display:none;font-size:11px;color:var(--tx-err)"></p>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="env-alloc-save" class="btn" style="flex:1;color:var(--tx-ok);border-color:var(--bd-ok);font-weight:500">Save</button>
+        <button id="env-alloc-cancel" class="btn" style="flex:1">Cancel</button>
+      </div>
+    </div>`:''}
+    <button id="env-edit-open" class="btn" style="width:100%;margin-top:8px;font-size:12px;padding:6px;color:var(--tx2)">✎ Edit allocations</button>
     ${(()=>{
       var overCats=cats.filter(c=>c.budgetPct>0&&(S.envelopes[c.id]||0)-spentSince(c.id)<0);
       if(!overCats.length)return'';
@@ -1792,43 +1816,33 @@ function bind(){
   var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
   var clearMemBtn=g('clear-memory-btn');if(clearMemBtn)clearMemBtn.onclick=()=>{if(!confirm('Clear all merchant memory? Future imports won\'t have suggestions until you re-categorize.'))return;S.merchantMemory={};save();render();};
   document.querySelectorAll('[data-del-memory]').forEach(el=>el.onclick=()=>{var k=el.dataset.delMemory;var m={...S.merchantMemory};delete m[k];S.merchantMemory=m;save();render();});
-  document.querySelectorAll('[data-env-edit]').forEach(el=>el.onclick=()=>{
-    S._editEnvCat=S._editEnvCat===el.dataset.envEdit?null:el.dataset.envEdit;
-    render();
-    if(S._editEnvCat){setTimeout(()=>{var inp=document.getElementById('env-inp-'+S._editEnvCat);if(inp){inp.focus();inp.select();}},50);}
-  });
-  document.querySelectorAll('[data-env-save]').forEach(el=>el.onclick=()=>{
-    var cid=el.dataset.envSave;
-    var inp=document.getElementById('env-inp-'+cid);
-    var v=Math.round((parseFloat(inp?inp.value:0)||0)*100)/100;
-    if(isNaN(v)||v<0)return;
+  var envEditOpen=g('env-edit-open');if(envEditOpen)envEditOpen.onclick=()=>{S._editEnvOpen=true;render();setTimeout(()=>{var first=document.querySelector('.env-alloc-inp:not([readonly])');if(first)first.focus();},50);};
+  var envAllocCancel=g('env-alloc-cancel');if(envAllocCancel)envAllocCancel.onclick=()=>{S._editEnvOpen=false;render();};
+  var envInps=document.querySelectorAll('.env-alloc-inp:not([readonly])');
+  var envTotal=document.querySelector('.env-alloc-total');
+  var envWarn=document.querySelector('.env-alloc-warning');
+  var envLast=document.querySelector('.env-alloc-inp[readonly]');
+  function updateEnvTotal(){
+    var sum=0;
+    envInps.forEach(inp=>{sum=Math.round((sum+(parseFloat(inp.value)||0))*100)/100;});
+    var poolTotal=gc().filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
+    var lastVal=Math.round((poolTotal-sum)*100)/100;
+    if(envLast){
+      if(lastVal<0){envLast.value='0.00';if(envWarn){envWarn.style.display='block';envWarn.textContent='Over by '+fm(Math.abs(lastVal))+' — reduce other amounts.';}}
+      else{envLast.value=lastVal.toFixed(2);if(envWarn)envWarn.style.display='none';}
+    }
+    if(envTotal)envTotal.textContent=fm(Math.round((sum+Math.max(0,lastVal))*100)/100);
+  }
+  envInps.forEach(inp=>inp.oninput=updateEnvTotal);
+  var envAllocSave=g('env-alloc-save');if(envAllocSave)envAllocSave.onclick=()=>{
     var cats=gc().filter(c=>c.budgetPct>0);
-    var sf=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0); // total pool = current envelope sum
-    var diff=Math.round((v-(S.envelopes[cid]||0))*100)/100; // how much this category changed
-    if(Math.abs(diff)<0.01){S._editEnvCat=null;render();return;}
-    // Find other categories to absorb the difference (sorted by most surplus first)
-    var others=cats.filter(c=>c.id!==cid).sort((a,b)=>{
-      var remA=(S.envelopes[a.id]||0)-spentSince(a.id);
-      var remB=(S.envelopes[b.id]||0)-spentSince(b.id);
-      return diff>0?remB-remA:remA-remB; // take from most surplus if increasing, add to most surplus if decreasing
-    });
-    var newEnv={...S.envelopes,[cid]:v};
-    var remaining=diff;
-    for(var i=0;i<others.length&&Math.abs(remaining)>0.01;i++){
-      var oc=others[i];
-      var cur=newEnv[oc.id]||0;
-      var adjust=Math.min(Math.abs(remaining),Math.max(0,cur))*Math.sign(remaining)*-1;
-      adjust=Math.round(adjust*100)/100;
-      newEnv[oc.id]=Math.round((cur+adjust)*100)/100;
-      remaining=Math.round((remaining+adjust)*100)/100;
-    }
-    // If still can't balance (all others at 0), clamp the edited value
-    if(Math.abs(remaining)>0.01){
-      newEnv[cid]=Math.round((v-remaining)*100)/100;
-    }
-    S.envelopes=newEnv;
-    S._editEnvCat=null;save();render();
-  });
+    var newEnv={...S.envelopes};
+    document.querySelectorAll('.env-alloc-inp').forEach(inp=>{var cid=inp.dataset.envCat;var v=Math.round((parseFloat(inp.value)||0)*100)/100;newEnv[cid]=v;});
+    var total=cats.reduce((s,c)=>s+(newEnv[c.id]||0),0);
+    var poolTotal=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
+    if(Math.abs(total-poolTotal)>0.02){if(envWarn){envWarn.style.display='block';envWarn.textContent='Total must equal '+fm(poolTotal)+'.';}return;}
+    S.envelopes=newEnv;S._editEnvOpen=false;save();render();
+  };
   document.querySelectorAll('[data-rebalance-to]').forEach(el=>el.onclick=()=>{
     var toCatId=el.dataset.rebalanceTo;
     var newEnv={...S.envelopes};
