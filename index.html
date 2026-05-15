@@ -687,20 +687,37 @@ function combinedSpendCard(sf,up,tot){
     </div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
     ${cats.filter(c=>c.budgetPct>0).map(c=>{
-      var alloc=S.envelopes[c.id]||0,spent=spentSince(c.id),rem=Math.max(0,alloc-spent);
+      var alloc=S.envelopes[c.id]||0,spent=spentSince(c.id),rem=alloc-spent;
+      var over=rem<0;
       var spPct=alloc>0?Math.min(1,spent/alloc):0;
-      var dotC=co(c.color).c,amtC=tileAmtColor(rem,alloc),bC=barColor(spent,alloc);
+      var dotC=co(c.color).c;
+      var amtC=over?'var(--tx-err)':tileAmtColor(rem,alloc);
+      var bC=over?'var(--tx-err)':barColor(spent,alloc);
       var prevSpent=prev?spentBetween(c.id,prev,S.lastPaycheckDate):null;
       var trendHtml='';
       if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<p style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-top:2px">${diff<0?'↓':'↑'} ${pct}% vs last</p>`;}
-      return`<div style="background:var(--bg);border-radius:10px;padding:11px 13px">
-        <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px"><div style="width:6px;height:6px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2);font-weight:500">${c.label}</p></div>
-        <p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${fm(rem)}</p>
-        <div style="height:4px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:7px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(spPct*100)}%"></div></div>
+      return`<div style="background:var(--bg);border-radius:10px;padding:11px 13px;border:1px solid ${over?'var(--bd-err)':'transparent'}" ${over?`data-rebalance-from="${c.id}"`:''}>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px"><div style="width:6px;height:6px;border-radius:50%;background:${dotC};flex-shrink:0"></div><p style="font-size:11px;color:var(--tx2);font-weight:500">${c.label}</p>${over?`<span style="font-size:9px;font-weight:600;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}</div>
+        <p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>
+        <div style="height:4px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-top:7px"><div style="height:100%;border-radius:4px;background:${bC};width:100%"></div></div>
         <p style="font-size:10px;color:var(--tx2);margin-top:4px">of ${fm(alloc)}</p>
         ${trendHtml}
       </div>`;
     }).join('')}
+    </div>
+    ${(()=>{
+      var overCats=cats.filter(c=>c.budgetPct>0&&(S.envelopes[c.id]||0)-spentSince(c.id)<0);
+      if(!overCats.length)return'';
+      var totalOver=overCats.reduce((s,c)=>s+Math.abs((S.envelopes[c.id]||0)-spentSince(c.id)),0);
+      var hasSurplus=cats.filter(c=>c.budgetPct>0&&(S.envelopes[c.id]||0)-spentSince(c.id)>0);
+      if(!hasSurplus.length)return`<div style="margin-top:10px;padding:10px 12px;background:var(--bg-err);border-radius:8px;border:1px solid var(--bd-err)"><p style="font-size:12px;color:var(--tx-err)">⚠ You're ${fm(totalOver)} over budget with no surplus to cover it.</p></div>`;
+      return`<div style="margin-top:10px;padding:12px;background:var(--bg-warn);border-radius:8px;border:1px solid var(--bd-warn)">
+        <p style="font-size:12px;font-weight:600;color:var(--tx-warn);margin-bottom:8px">⚠ ${fm(totalOver)} over budget — cover it by reducing another category:</p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${hasSurplus.map(c=>{var rem=(S.envelopes[c.id]||0)-spentSince(c.id);return`<button data-rebalance-to="${c.id}" data-rebalance-amt="${Math.min(rem,totalOver).toFixed(2)}" class="btn" style="font-size:12px;padding:5px 10px;color:var(--tx-warn);border-color:var(--bd-warn)">${c.label} (${fm(rem)} left)</button>`;}).join('')}
+        </div>
+      </div>`;
+    })()}
     </div></div>`:''}
   </div>`;
 }
@@ -1736,6 +1753,22 @@ function bind(){
   var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
   var clearMemBtn=g('clear-memory-btn');if(clearMemBtn)clearMemBtn.onclick=()=>{if(!confirm('Clear all merchant memory? Future imports won\'t have suggestions until you re-categorize.'))return;S.merchantMemory={};save();render();};
   document.querySelectorAll('[data-del-memory]').forEach(el=>el.onclick=()=>{var k=el.dataset.delMemory;var m={...S.merchantMemory};delete m[k];S.merchantMemory=m;save();render();});
+  document.querySelectorAll('[data-rebalance-to]').forEach(el=>el.onclick=()=>{
+    var toCatId=el.dataset.rebalanceTo;
+    var newEnv={...S.envelopes};
+    var cats=gc();
+    cats.filter(c=>c.budgetPct>0).forEach(c=>{
+      var rem=(newEnv[c.id]||0)-spentSince(c.id);
+      if(rem<0){
+        var cover=Math.min(Math.abs(rem),(newEnv[toCatId]||0)-spentSince(toCatId));
+        if(cover>0){
+          newEnv[c.id]=Math.round(((newEnv[c.id]||0)+cover)*100)/100;
+          newEnv[toCatId]=Math.round(((newEnv[toCatId]||0)-cover)*100)/100;
+        }
+      }
+    });
+    S.envelopes=newEnv;save();render();
+  });
   var txBtn2=g('txBtn2');if(txBtn2)txBtn2.onclick=()=>{S.view='home';S.txForm=true;S.txType='expense';S.txAcct='chime';render();setTimeout(()=>{var c=document.getElementById('content');if(c)c.scrollTop=c.scrollHeight;},50);};
   var exportBtn=g('export-csv-btn');if(exportBtn)exportBtn.onclick=()=>exportCSV();
   var bulkBtn=g('bulk-cat-btn');if(bulkBtn)bulkBtn.onclick=()=>{S.bulkCat=true;render()};
