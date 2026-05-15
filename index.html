@@ -47,7 +47,32 @@ import{initializeFirestore,persistentLocalCache,doc,onSnapshot,setDoc,getDoc,del
 const fb=initializeApp({apiKey:"AIzaSyABQvIcpgyTQg4_-rtw_zfxrOSB5ypg0vA",authDomain:"paydayguard.firebaseapp.com",projectId:"paydayguard",storageBucket:"paydayguard.firebasestorage.app",messagingSenderId:"801514317764",appId:"1:801514317764:web:35ee6daae70af0a31fa691"});
 const auth=getAuth(fb),db=initializeFirestore(fb,{localCache:persistentLocalCache()});
 
-var COLORS={warning:{bg:'var(--bg-warn)',c:'var(--tx-warn)'},info:{bg:'var(--bg-info)',c:'var(--tx-info)'},success:{bg:'var(--bg-ok)',c:'var(--tx-ok)'},danger:{bg:'var(--bg-err)',c:'var(--tx-err)'},secondary:{bg:'var(--bg2)',c:'var(--tx2)'}};
+var COLORS={
+  warning:{bg:'var(--bg-warn)',c:'var(--tx-warn)'},
+  info:{bg:'var(--bg-info)',c:'var(--tx-info)'},
+  success:{bg:'var(--bg-ok)',c:'var(--tx-ok)'},
+  danger:{bg:'var(--bg-err)',c:'var(--tx-err)'},
+  secondary:{bg:'var(--bg2)',c:'var(--tx2)'},
+  purple:{bg:'#f3e8ff',c:'#7c3aed'},
+  pink:{bg:'#fdf2f8',c:'#be185d'},
+  orange:{bg:'#fff7ed',c:'#c2410c'},
+  teal:{bg:'#f0fdfa',c:'#0f766e'},
+  indigo:{bg:'#eef2ff',c:'#4338ca'},
+  rose:{bg:'#fff1f2',c:'#be123c'},
+  cyan:{bg:'#ecfeff',c:'#0e7490'},
+  lime:{bg:'#f7fee7',c:'#4d7c0f'},
+};
+// Dark mode overrides for new colors
+if(window.matchMedia('(prefers-color-scheme:dark)').matches){
+  COLORS.purple={bg:'#2e1065',c:'#c084fc'};
+  COLORS.pink={bg:'#500724',c:'#f9a8d4'};
+  COLORS.orange={bg:'#431407',c:'#fb923c'};
+  COLORS.teal={bg:'#042f2e',c:'#2dd4bf'};
+  COLORS.indigo={bg:'#1e1b4b',c:'#818cf8'};
+  COLORS.rose={bg:'#4c0519',c:'#fb7185'};
+  COLORS.cyan={bg:'#083344',c:'#22d3ee'};
+  COLORS.lime={bg:'#1a2e05',c:'#a3e635'};
+}
 var DEFCATS=[{id:'food',label:'Food & Dining',color:'warning',budgetPct:0},{id:'gas',label:'Gas & Transport',color:'info',budgetPct:0},{id:'entertain',label:'Entertainment',color:'success',budgetPct:0},{id:'health',label:'Health & Medical',color:'danger',budgetPct:0},{id:'other',label:'Other',color:'secondary',budgetPct:0}];
 var FREQ=['weekly','biweekly','monthly','annually'];
 var U=null,T=null,unsub=null;
@@ -713,58 +738,56 @@ function combinedSpendCard(sf,up,tot){
       <p style="font-size:12px;color:${heroSt.c};opacity:.75">Budget remaining by category</p>
       <p style="font-size:12px;color:${heroSt.c};opacity:.75">${dy!==null?dy+' days left':''}</p>
     </div>
-    <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;flex-direction:column;gap:6px">
     ${cats.filter(c=>c.budgetPct>0).map(c=>{
       var alloc=S.envelopes[c.id]||0,spent=spentSince(c.id),rem=alloc-spent;
       var over=rem<0;
       var spPct=alloc>0?Math.min(1,spent/alloc):0;
-      var dotC=co(c.color).c;
-      var amtC=over?'var(--tx-err)':tileAmtColor(rem,alloc);
+      var remPct=Math.round((1-spPct)*100);
+      var dotC=co(c.color).c,dotBg=co(c.color).bg;
+      var amtC=over?'var(--tx-err)':rem<alloc*0.15?'var(--tx-err)':rem<alloc*0.35?'var(--tx-warn)':'var(--tx)';
       var bC=over?'var(--tx-err)':barColor(spent,alloc);
       var prevSpent=prev?spentBetween(c.id,prev,S.lastPaycheckDate):null;
-      var trendHtml='';
-      if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;var pct=Math.round(Math.abs(diff)/prevSpent*100);trendHtml=`<span style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-left:8px">${diff<0?'↓':'↑'} ${pct}% vs last</span>`;}
-      return`<div style="background:var(--bg);border-radius:10px;padding:12px 14px;border:1px solid ${over?'var(--bd-err)':'transparent'}" ${over?`data-rebalance-from="${c.id}"`:''}>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div style="display:flex;align-items:center;gap:6px">
-            <div style="width:8px;height:8px;border-radius:50%;background:${dotC};flex-shrink:0"></div>
-            <p style="font-size:13px;font-weight:500">${c.label}</p>
-            ${over?`<span style="font-size:9px;font-weight:600;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}
-            ${trendHtml}
-          </div>
-          <div style="text-align:right">
-            <p class="mono" style="font-size:18px;font-weight:700;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>
-            <p style="font-size:10px;color:var(--tx2);margin-top:1px">of ${fm(alloc)}</p>
-          </div>
+      var trend='';
+      if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;trend=` <span style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'}">${diff<0?'↓':'↑'}${Math.round(Math.abs(diff)/prevSpent*100)}%</span>`;}
+      var isEditing=S._editEnvOpen;
+      return`<div style="background:var(--bg);border-radius:10px;padding:11px 14px;border:1px solid ${over?'var(--bd-err)':'var(--bd)'}" ${over?`data-rebalance-from="${c.id}"`:''}>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <div style="width:9px;height:9px;border-radius:50%;background:${dotC};flex-shrink:0"></div>
+          <p style="font-size:13px;font-weight:500;flex:1">${c.label}${over?` <span style="font-size:9px;font-weight:700;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}${trend}</p>
+          ${isEditing
+            ?`<input class="field mono env-alloc-inp" data-env-cat="${c.id}" type="number" step="0.01" value="${alloc.toFixed(2)}" style="width:90px;text-align:right;padding:4px 8px;font-size:13px;height:30px">`
+            :`<p class="mono" style="font-size:16px;font-weight:600;color:${amtC}">${over?'-':''}${fm(Math.abs(rem))}</p>`}
         </div>
-        <div style="height:5px;border-radius:4px;background:var(--bg2);overflow:hidden"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(Math.min(1,spPct)*100)}%"></div></div>
+        <div style="height:5px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:5px"><div style="height:100%;border-radius:4px;background:${bC};width:${Math.round(spPct*100)}%"></div></div>
+        <p style="font-size:10px;color:var(--tx2)">${over?fm(Math.abs(rem))+' over budget':remPct+'% left · '+fm(spent)+' spent of '+fm(alloc)}</p>
       </div>`;
     }).join('')}
     </div>
-    ${S._editEnvOpen?`<div style="margin-top:10px;padding:12px;background:var(--bg);border-radius:10px;border:1px solid var(--bd)">
-      <p style="font-size:12px;font-weight:600;color:var(--tx2);margin-bottom:10px">Edit allocations — last category adjusts automatically</p>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        ${cats.filter(c=>c.budgetPct>0).map((c,idx,arr)=>{
-          var isLast=idx===arr.length-1;
-          var alloc=S.envelopes[c.id]||0;
-          return`<div style="display:flex;align-items:center;gap:8px">
-            <div style="width:8px;height:8px;border-radius:50%;background:${co(c.color).c};flex-shrink:0"></div>
-            <p style="font-size:13px;flex:1">${c.label}</p>
-            <input class="field mono env-alloc-inp" data-env-cat="${c.id}" data-env-last="${isLast}" type="number" step="0.01" value="${alloc.toFixed(2)}" style="width:100px;text-align:right;padding:5px 8px;font-size:13px${isLast?';background:var(--bg2)':''}" ${isLast?'readonly':''}>
-          </div>`;
-        }).join('')}
-        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--bd);padding-top:8px;margin-top:2px">
-          <p style="font-size:11px;color:var(--tx2)">Total</p>
-          <p class="mono env-alloc-total" style="font-size:13px;font-weight:600">${fm(cats.filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0))}</p>
+    ${(()=>{
+      var overCats=cats.filter(c=>c.budgetPct>0&&(S.envelopes[c.id]||0)-spentSince(c.id)<0);
+      if(!overCats.length)return'';
+      var totalOver=overCats.reduce((s,c)=>s+Math.abs((S.envelopes[c.id]||0)-spentSince(c.id)),0);
+      var hasSurplus=cats.filter(c=>c.budgetPct>0&&(S.envelopes[c.id]||0)-spentSince(c.id)>0);
+      if(!hasSurplus.length)return`<div style="margin-top:8px;padding:10px 12px;background:var(--bg-err);border-radius:8px;border:1px solid var(--bd-err)"><p style="font-size:12px;color:var(--tx-err)">⚠ ${fm(totalOver)} over budget with no surplus to cover it.</p></div>`;
+      return`<div style="margin-top:8px;padding:12px;background:var(--bg-warn);border-radius:8px;border:1px solid var(--bd-warn)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <p style="font-size:12px;font-weight:600;color:var(--tx-warn)">⚠ ${fm(totalOver)} over — cover from:</p>
+          ${_prevEnvelopes?`<button id="rebalance-undo-btn" class="btn" style="font-size:11px;padding:3px 10px;min-height:0;color:var(--tx-warn);border-color:var(--bd-warn)">Undo</button>`:''}
         </div>
-        <p class="env-alloc-warning" style="display:none;font-size:11px;color:var(--tx-err)"></p>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button id="env-alloc-save" class="btn" style="flex:1;color:var(--tx-ok);border-color:var(--bd-ok);font-weight:500">Save</button>
-        <button id="env-alloc-cancel" class="btn" style="flex:1">Cancel</button>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${hasSurplus.map(c=>{var rem=(S.envelopes[c.id]||0)-spentSince(c.id);return`<button data-rebalance-to="${c.id}" data-rebalance-amt="${Math.min(rem,totalOver).toFixed(2)}" class="btn" style="font-size:12px;padding:5px 10px;color:var(--tx-warn);border-color:var(--bd-warn)">${c.label} (${fm(rem)})</button>`;}).join('')}
+        </div>
+      </div>`;
+    })()}
+    ${S._editEnvOpen?`<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding:8px 12px;background:var(--bg);border-radius:8px;border:1px solid var(--bd)">
+      <p style="font-size:12px;color:var(--tx2)">Total: <span class="mono env-alloc-total" style="font-weight:600">${fm(cats.filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0))}</span> <span class="env-alloc-warning" style="display:none;color:var(--tx-err);font-size:11px"></span></p>
+      <div style="display:flex;gap:6px">
+        <button id="env-alloc-save" class="btn" style="font-size:12px;padding:5px 12px;min-height:0;color:var(--tx-ok);border-color:var(--bd-ok);font-weight:500">Save</button>
+        <button id="env-alloc-cancel" class="btn" style="font-size:12px;padding:5px 12px;min-height:0">Cancel</button>
       </div>
     </div>`:''}
-    <button id="env-edit-open" class="btn" style="width:100%;margin-top:8px;font-size:12px;padding:6px;color:var(--tx2)">✎ Edit allocations</button>
+    <button id="env-edit-open" class="btn" style="width:100%;margin-top:8px;font-size:12px;padding:6px;color:var(--tx2)">${S._editEnvOpen?'':'✎ Edit allocations'}</button>
     ${(()=>{
       var overCats=cats.filter(c=>c.budgetPct>0&&(S.envelopes[c.id]||0)-spentSince(c.id)<0);
       if(!overCats.length)return'';
@@ -913,7 +936,7 @@ function billsView(){
         </div>
         ${ec?`<div style="margin-top:8px;padding:12px;background:var(--bg2);border-radius:8px">
           <input class="field" id="catName" type="text" placeholder="Category name" value="${c.label}" style="margin-bottom:8px">
-          <div id="swatches" style="display:flex;gap:8px;margin-bottom:10px">${Object.keys(COLORS).map(k=>swatch(k,k===c.color)).join('')}</div>
+          <div id="swatches" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">${Object.keys(COLORS).map(k=>swatch(k,k===c.color)).join('')}</div>
           <input type="hidden" id="catColor" value="${c.color}">
           <div style="display:flex;gap:8px"><button class="btn" id="catSave" style="flex:1;font-weight:500">Save</button><button class="btn" id="catCancel" style="flex:1">Cancel</button></div>
         </div>`:''}
@@ -934,7 +957,7 @@ function billsView(){
     ${S.catForm&&!S.editCat?`<div style="padding:12px;background:var(--bg2);border-radius:8px">
       <p style="font-size:13px;font-weight:500;margin-bottom:8px">New category</p>
       <input class="field" id="catName" type="text" placeholder="e.g. Groceries" style="margin-bottom:8px">
-      <div id="swatches" style="display:flex;gap:8px;margin-bottom:10px">${Object.keys(COLORS).map(k=>swatch(k,k==='warning')).join('')}</div>
+      <div id="swatches" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">${Object.keys(COLORS).map(k=>swatch(k,k==='warning')).join('')}</div>
       <input type="hidden" id="catColor" value="warning">
       <div style="display:flex;gap:8px"><button class="btn" id="catSave" style="flex:1;font-weight:500">Save</button><button class="btn" id="catCancel" style="flex:1">Cancel</button></div>
     </div>`:''}
@@ -1816,22 +1839,21 @@ function bind(){
   var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
   var clearMemBtn=g('clear-memory-btn');if(clearMemBtn)clearMemBtn.onclick=()=>{if(!confirm('Clear all merchant memory? Future imports won\'t have suggestions until you re-categorize.'))return;S.merchantMemory={};save();render();};
   document.querySelectorAll('[data-del-memory]').forEach(el=>el.onclick=()=>{var k=el.dataset.delMemory;var m={...S.merchantMemory};delete m[k];S.merchantMemory=m;save();render();});
-  var envEditOpen=g('env-edit-open');if(envEditOpen)envEditOpen.onclick=()=>{S._editEnvOpen=true;render();setTimeout(()=>{var first=document.querySelector('.env-alloc-inp:not([readonly])');if(first)first.focus();},50);};
+  var envEditOpen=g('env-edit-open');if(envEditOpen)envEditOpen.onclick=()=>{S._editEnvOpen=!S._editEnvOpen;render();if(S._editEnvOpen)setTimeout(()=>{var first=document.querySelector('.env-alloc-inp');if(first)first.focus();},50)};
   var envAllocCancel=g('env-alloc-cancel');if(envAllocCancel)envAllocCancel.onclick=()=>{S._editEnvOpen=false;render();};
-  var envInps=document.querySelectorAll('.env-alloc-inp:not([readonly])');
+  var envInps=document.querySelectorAll('.env-alloc-inp');
   var envTotal=document.querySelector('.env-alloc-total');
   var envWarn=document.querySelector('.env-alloc-warning');
-  var envLast=document.querySelector('.env-alloc-inp[readonly]');
+  var poolTotal=gc().filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
   function updateEnvTotal(){
     var sum=0;
     envInps.forEach(inp=>{sum=Math.round((sum+(parseFloat(inp.value)||0))*100)/100;});
-    var poolTotal=gc().filter(c=>c.budgetPct>0).reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
-    var lastVal=Math.round((poolTotal-sum)*100)/100;
-    if(envLast){
-      if(lastVal<0){envLast.value='0.00';if(envWarn){envWarn.style.display='block';envWarn.textContent='Over by '+fm(Math.abs(lastVal))+' — reduce other amounts.';}}
-      else{envLast.value=lastVal.toFixed(2);if(envWarn)envWarn.style.display='none';}
+    if(envTotal){
+      envTotal.textContent=fm(sum);
+      var off=Math.abs(sum-poolTotal)>0.02;
+      envTotal.style.color=off?'var(--tx-err)':'var(--tx-ok)';
+      if(envWarn){envWarn.style.display=off?'block':'none';if(off)envWarn.textContent='Must add up to '+fm(poolTotal)+'. Currently '+fm(sum)+'.';}
     }
-    if(envTotal)envTotal.textContent=fm(Math.round((sum+Math.max(0,lastVal))*100)/100);
   }
   envInps.forEach(inp=>inp.oninput=updateEnvTotal);
   var envAllocSave=g('env-alloc-save');if(envAllocSave)envAllocSave.onclick=()=>{
@@ -1839,8 +1861,10 @@ function bind(){
     var newEnv={...S.envelopes};
     document.querySelectorAll('.env-alloc-inp').forEach(inp=>{var cid=inp.dataset.envCat;var v=Math.round((parseFloat(inp.value)||0)*100)/100;newEnv[cid]=v;});
     var total=cats.reduce((s,c)=>s+(newEnv[c.id]||0),0);
-    var poolTotal=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
-    if(Math.abs(total-poolTotal)>0.02){if(envWarn){envWarn.style.display='block';envWarn.textContent='Total must equal '+fm(poolTotal)+'.';}return;}
+    if(Math.abs(total-poolTotal)>0.02){
+      if(envWarn){envWarn.style.display='block';envWarn.textContent='Must add up to '+fm(poolTotal)+'. Currently '+fm(total)+'.';}
+      return;
+    }
     S.envelopes=newEnv;S._editEnvOpen=false;save();render();
   };
   document.querySelectorAll('[data-rebalance-to]').forEach(el=>el.onclick=()=>{
