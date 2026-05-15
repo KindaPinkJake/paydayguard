@@ -1943,11 +1943,13 @@ function bind(){
   var txI=g('txI');if(txI)txI.onclick=()=>{S.txType='income';render()};
   var txAs=g('txAcctSel');if(txAs)txAs.onchange=()=>{S.txAcct=txAs.value};
   var txS=g('txS');if(txS)txS.onclick=()=>{
+    try{
     var desc=(g('txD').value||'').trim(),amt=parseFloat(g('txA').value),date=g('txDt').value||tod();
     var acct=(g('txAcctSel')||{}).value||S.txAcct||'chime';
     var isExp=S.txType==='expense';
     var catEl=g('txC'),catVal=isExp&&catEl?catEl.value:'';
-    if(!desc||isNaN(amt)||amt<=0)return;
+    if(!desc){alert('Please enter a description.');return;}
+    if(isNaN(amt)||amt<=0){alert('Please enter a valid amount.');return;}
     if(isExp&&!catVal){alert('Please select a category.');return;}
     var fa=isExp?-Math.abs(amt):Math.abs(amt);
     var t={id:uid(),desc,amt:fa,date,account:acct};
@@ -1984,6 +1986,7 @@ function bind(){
     S.txns=[t].concat(S.txns);
     adjAcct(acct,fa);
     S.txForm=false;S.txType='expense';S.txAcct='chime';S.pendingBillLog=null;save();render();
+    }catch(err){alert('Error saving transaction: '+err.message);console.error(err);}
   };
   var txX=g('txX');if(txX)txX.onclick=()=>{S.txForm=false;S.txType='expense';S.txAcct='chime';S.pendingBillLog=null;render()};
   document.querySelectorAll('[data-fc]').forEach(el=>el.onclick=()=>{S.filt=el.dataset.fc;render()});
