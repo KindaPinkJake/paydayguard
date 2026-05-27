@@ -1461,10 +1461,8 @@ function bind(){
     var bill=S.bills.find(b=>b.id===billId);
     if(!bill)return;
     var tx=S.txns.find(t=>t.id===txId);
-    // Don't save bill→merchant memory: two bills can share same merchant name (e.g. two rent payments)
-    // Only advance nextDue if this transaction is for the current cycle
-    // (tx date >= bill's current nextDue minus one full period, i.e. it's recent)
-    var shouldAdvance=tx&&tx.date>=bill.nextDue;
+    // Always advance nextDue when bill is paid, even if paid early
+    var shouldAdvance=!!tx;
     // If in bulk mode, apply to all matching transactions
     if(S.bulkCat&&tx){
       var mKey=merchantKey(tx.desc);
@@ -1917,7 +1915,7 @@ function bind(){
       var bill=S.bills.find(b=>b.id===billId);
       if(bill){
         t.isBillPayment=true;t.billId=billId;
-        if(date>=bill.nextDue)S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
+        S.bills=S.bills.map(b=>b.id===billId?{...b,nextDue:adv(b)}:b);
       }
     }else if(catVal.startsWith('loan:')){
       var loanId=catVal.replace('loan:','');
