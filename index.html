@@ -84,11 +84,11 @@ var S={
   view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,
   txForm:false,txType:'expense',txAcct:'chime',
   catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,
-  filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,
+  filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,
   shareToken:null,showSharePanel:false,
   balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,
-  billAssignTxId:null,editTx:null,pendingBillLog:null,
-  goalForm:false,editGoal:null,editGoalAmt:null,_editEnvOpen:false,_editGoalsOpen:false,
+  billAssignTxId:null,loanAssignTxId:null,editTx:null,pendingBillLog:null,
+  goalForm:false,editGoal:null,_editEnvOpen:false,_editGoalsOpen:false,
 
   bulkCat:false,bulkBillMkey:null,
   importView:false,importData:null,importParsing:false,importFiles:[]
@@ -1373,7 +1373,7 @@ function render(){
 
 function bind(){
   var g=i=>document.getElementById(i);
-  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S.showAllocate=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkBillMkey=null;S.importView=false;S.importData=null;S.importFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
+  document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S._editEnvOpen=false;S._editGoalsOpen=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkBillMkey=null;S.importView=false;S.importData=null;S.importFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
@@ -1622,16 +1622,6 @@ function bind(){
   var asCancel=g('savings-amt-cancel');if(asCancel)asCancel.onclick=()=>{S.showWithdraw=false;S.showDeposit=false;S.savingsDepositGoalId=null;S.savingsWithdrawGoalId=null;render()};
 
   // Move unallocated to goal
-  var salBtn=g('savings-allocate-btn');if(salBtn)salBtn.onclick=()=>{S.showAllocate=!S.showAllocate;S.allocateGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
-  document.querySelectorAll('[data-allocate-goal]').forEach(el=>el.onclick=()=>{S.allocateGoalId=el.dataset.allocateGoal;render()});
-  var allocSave=g('allocate-save');if(allocSave)allocSave.onclick=()=>{
-    var v=parseFloat((g('allocate-amt-inp')||{}).value);
-    var goalId=S.allocateGoalId;
-    if(isNaN(v)||v<=0||!goalId)return;
-    S.savingsGoals=S.savingsGoals.map(g=>g.id===goalId?{...g,allocated:Math.round((g.allocated+v)*100)/100}:g);
-    S.showAllocate=false;S.allocateGoalId=null;save();render();
-  };
-  var allocCancel=g('allocate-cancel');if(allocCancel)allocCancel.onclick=()=>{S.showAllocate=false;S.allocateGoalId=null;render()};
 
   // Savings goals CRUD
   var agb=g('addGoalBtn');if(agb)agb.onclick=()=>{S.goalForm=true;S.editGoal=null;render()};
@@ -2020,7 +2010,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,bulkCat:false,bulkBillMkey:null,importView:false,importData:null,importParsing:false,importFiles:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,_editEnvOpen:false,_editGoalsOpen:false,bulkCat:false,bulkBillMkey:null,importView:false,importData:null,importParsing:false,importFiles:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
