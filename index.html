@@ -89,7 +89,7 @@ var S={
   balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,
   billAssignTxId:null,editTx:null,pendingBillLog:null,
   goalForm:false,editGoal:null,editGoalAmt:null,_editEnvOpen:false,
-  merchantMemory:{},
+
   bulkCat:false,bulkBillMkey:null,
   importView:false,importData:null,importParsing:false,importFiles:[]
 };
@@ -103,19 +103,19 @@ function rescaleEnvelopes(){
   if(!S.lastPaycheckDate)return;
   var cats=gc().filter(c=>c.budgetPct>0);
   if(!cats.length)return;
-  var sts=safe();
-  var sumSpent=cats.reduce((s,c)=>s+spentSince(c.id),0);
+  var sts=Math.round(safe()*100)/100;
+  var sumSpent=Math.round(cats.reduce((s,c)=>s+spentSince(c.id),0)*100)/100;
   var targetTotal=Math.round((sts+sumSpent)*100)/100;
-  var currentTotal=cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0);
+  var currentTotal=Math.round(cats.reduce((s,c)=>s+(S.envelopes[c.id]||0),0)*100)/100;
   if(!currentTotal||Math.abs(targetTotal-currentTotal)<0.02)return;
   var newEnv={...S.envelopes};
   cats.forEach(c=>{
-    newEnv[c.id]=Math.max(spentSince(c.id),Math.round((S.envelopes[c.id]||0)/currentTotal*targetTotal*100)/100);
+    var scaled=Math.round((S.envelopes[c.id]||0)/currentTotal*targetTotal*100)/100;
+    newEnv[c.id]=Math.max(Math.round(spentSince(c.id)*100)/100,scaled);
   });
-  // Fix rounding on largest to ensure exact total
-  var newTotal=cats.reduce((s,c)=>s+(newEnv[c.id]||0),0);
+  var newTotal=Math.round(cats.reduce((s,c)=>s+(newEnv[c.id]||0),0)*100)/100;
   var rem=Math.round((targetTotal-newTotal)*100)/100;
-  if(Math.abs(rem)>0.005){
+  if(Math.abs(rem)>=0.01){
     var largest=cats.slice().sort((a,b)=>(newEnv[b.id]||0)-(newEnv[a.id]||0))[0];
     if(largest)newEnv[largest.id]=Math.round(((newEnv[largest.id]||0)+rem)*100)/100;
   }
@@ -207,7 +207,7 @@ function startListener(){
       S.envelopes=d.envelopes||{};
       S.lastPaycheckDate=d.lastPaycheckDate||'';
       S.shareToken=d.shareToken||null;
-      S.merchantMemory=d.merchantMemory||{};
+
       S.balConfirmedDate=d.balConfirmedDate||null;
       S.savingsConfirmedDate=d.savingsConfirmedDate||null;
       S.hsaConfirmedDate=d.hsaConfirmedDate||null;
@@ -226,7 +226,7 @@ function save(){
   if(!S.txns.length&&!S.bills.length&&!S.paychecks.length&&!S.bal&&!S._dataLoaded)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,merchantMemory:S.merchantMemory,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
 }
@@ -268,7 +268,8 @@ function days(){var pd=getPayday();if(!pd)return null;var now=new Date();now.set
 function showLevel(v){if(!getPayday())return'safe';return v<20?'danger':v<100?'warning':'safe'}
 function ls(l){return{danger:{c:'var(--tx-err)',bg:'var(--bg-err)',br:'var(--bd-err)'},warning:{c:'var(--tx-warn)',bg:'var(--bg-warn)',br:'var(--bd-warn)'},safe:{c:'var(--tx-ok)',bg:'var(--bg-ok)',br:'var(--bd-ok)'}}[l]}
 function pcsToday(){
-  var t=tod();return S.paychecks.filter(p=>p.nextDate===t&&!S.disPcs.includes(p.id));
+  var t=tod();
+  return S.paychecks.filter(p=>p.nextDate<=t&&!S.disPcs.includes(p.id));
 }
 function billsDue(){
   var t=tod();
@@ -292,6 +293,7 @@ function bcard(title,bid,val){
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <button class="btn" id="${bid}-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
       <button class="btn" id="${bid}-log" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
+      <button class="btn" id="${bid}-cfm" style="font-size:12px;padding:5px 10px;flex:1;color:var(--tx-ok);border-color:var(--bd-ok)">✓ Confirm</button>
     </div>
     <p style="font-size:10px;color:${staleColor}">${staleLabel}</p>
     <div id="${bid}-f" style="display:none;margin-top:10px;border-top:1px solid var(--bd);padding-top:10px">
@@ -396,36 +398,6 @@ function merchantKey(desc){
   return desc.toLowerCase().replace(/[^a-z0-9 ]/g,' ').trim().split(/\s+/).slice(0,4).join(' ');
 }
 
-function suggestCategory(desc){
-  if(!desc)return null;
-  // Check merchant memory first — user's past choices take priority
-  var key=merchantKey(desc);
-  if(key&&S.merchantMemory[key]){
-    var remembered=S.merchantMemory[key];
-    if(gc().find(c=>c.id===remembered))return remembered;
-  }
-  var d=desc.toLowerCase();
-  var cats=gc();
-  for(var hint of MERCHANT_HINTS){
-    for(var word of hint.words){
-      if(d.includes(word)){
-        // Find a category whose label contains the hint label (case-insensitive)
-        var match=cats.find(c=>c.label.toLowerCase().includes(hint.label)||hint.label.includes(c.label.toLowerCase().replace(/[^a-z]/g,'')));
-        if(match)return match.id;
-        // Fallback: return first non-special category
-        break;
-      }
-    }
-  }
-  // If nothing matched, check if any category label appears in the description
-  for(var c of cats){
-    var words=c.label.toLowerCase().split(/\s+/);
-    for(var w of words){
-      if(w.length>3&&d.includes(w))return c.id;
-    }
-  }
-  return null;
-}
 
 var SAVINGS_TRANSFER_KEYWORDS=['save when you spend','round up','roundup','automatic savings','savings transfer','move money','transfer to savings','transfer from savings','chime transfer','move to spending','chime savings account','to chime savings'];
 
@@ -560,7 +532,7 @@ function banners(){
   if(unc){
     var cats=gc();
     var remaining=S.txns.filter(t=>t.amt<0&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment&&t.txType!=='income'&&t.txType!=='savings_withdrawal'&&t.txType!=='savings_deposit'&&t.txType!=='savings_transfer'&&t.account!=='chimeSavings').length;
-    var suggested=unc.suggestedCat||null;
+    var suggested=null;
     return`<div style="background:var(--bg);border:1px solid var(--bd2);border-radius:12px;padding:14px 16px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div>
@@ -1092,17 +1064,6 @@ function importStatementTxns(stmtTxns){
       tx.txType='income';
     }else if(isSavingsTransfer(desc)){
       tx.txType='savings_transfer';
-    }else{
-      var mkey=merchantKey(desc);
-      var remembered=mkey?S.merchantMemory[mkey]:null;
-      if(remembered&&remembered.startsWith('__loan:')){
-        var loanId=remembered.replace('__loan:','');
-        if(S.loans.find(l=>l.id===loanId))tx.suggestedLoanId=loanId;
-      }else if(remembered&&gc().find(c=>c.id===remembered)){
-        tx.suggestedCat=remembered;
-      }else{
-        var sc2=suggestCategory(desc);if(sc2)tx.suggestedCat=sc2;
-      }
     }
     imported.push(tx);
   });
@@ -1168,7 +1129,7 @@ function importViewHtml(){
     ${newExpenses.length?`<p style="font-size:12px;color:var(--tx2);font-weight:500;margin-bottom:6px">EXPENSES (${newExpenses.length})</p>
     <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
     ${newExpenses.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
-      <div><p style="font-size:13px">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}${t.cat?' · <span style="color:var(--tx-ok)">'+gc().find(c=>c.id===t.cat)?.label+'</span>':t.suggestedCat?' · suggestion: '+gc().find(c=>c.id===t.suggestedCat)?.label:''}</p></div>
+      <div><p style="font-size:13px">${t.desc}</p><p style="font-size:11px;color:var(--tx2)">${fd(t.date)}${t.cat?' · <span style="color:var(--tx-ok)">'+gc().find(c=>c.id===t.cat)?.label+'</span>':''}</p></div>
       <p class="mono" style="font-size:13px;color:var(--tx-err)">${fm(t.amt)}</p>
     </div>`).join('')}
     </div>`:''}
@@ -1357,27 +1318,6 @@ function historyView(){
       <button class="btn" id="reset-txns-btn" style="font-size:13px;padding:6px 12px;color:var(--tx-err);border-color:var(--bd-err)">Reset</button>
     </div>
   </div>
-  ${(()=>{
-    var keys=Object.keys(S.merchantMemory||{});
-    if(!keys.length)return'';
-    var cats=gc();
-    return`<div style="margin-bottom:14px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <p style="font-size:12px;font-weight:500;color:var(--tx2);text-transform:uppercase;letter-spacing:.06em">Merchant memory</p>
-      <button class="btn" id="clear-memory-btn" style="font-size:11px;padding:3px 8px;color:var(--tx-err);min-height:0">Clear all</button>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:4px">
-      ${keys.map(k=>{
-        var val=S.merchantMemory[k];
-        var label=val&&val.startsWith('__loan:')?'Loan payment':cats.find(c=>c.id===val)?.label||val;
-        return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:7px 12px">
-          <div><p style="font-size:13px">${k}</p><p style="font-size:11px;color:var(--tx2)">→ ${label}</p></div>
-          <button class="btn" data-del-memory="${k}" style="font-size:11px;padding:3px 8px;color:var(--tx-err);min-height:0">✕</button>
-        </div>`;
-      }).join('')}
-    </div>
-    </div>`;
-  })()}
   ${S.txForm?txForm():''}
   <div style="margin-bottom:10px;display:flex;flex-direction:column;gap:8px">
     <div style="display:flex;gap:8px">
@@ -1474,6 +1414,8 @@ function bind(){
   };
   function ti(eb,fb,ib,val){var e=g(eb),f=g(fb),i=g(ib);if(!e||!f)return;e.onclick=()=>{var sh=f.style.display!=='none';f.style.display=sh?'none':'block';if(!sh&&i){i.value=val;i.focus()}}}
   ti('chime-eb','chime-f','chime-i',S.bal);ti('hsa-eb','hsa-f','hsa-i',S.hsa);
+  var chimeCfm=g('chime-cfm');if(chimeCfm)chimeCfm.onclick=()=>{S.balConfirmedDate=tod();rescaleEnvelopes();save();render();};
+  var hsaCfm=g('hsa-cfm');if(hsaCfm)hsaCfm.onclick=()=>{S.hsaConfirmedDate=tod();save();render();};
   var csb=g('chime-sb');if(csb)csb.onclick=()=>{var v=parseFloat(g('chime-i').value);if(!isNaN(v)){S.bal=Math.round(v*100)/100;S.balConfirmedDate=tod();rescaleEnvelopes();save();render()}};
   var hsb=g('hsa-sb');if(hsb)hsb.onclick=()=>{var v=parseFloat(g('hsa-i').value);if(!isNaN(v)){S.hsa=Math.round(v*100)/100;S.hsaConfirmedDate=tod();save();render()}};
   var clb=g('chime-log');if(clb)clb.onclick=()=>{S.txForm=true;S.txType='expense';S.txAcct='chime';S.view='home';render();document.getElementById('content').scrollTop=document.getElementById('content').scrollHeight};
@@ -1492,9 +1434,8 @@ function bind(){
     var tx=S.txns.find(t=>t.id===txId);
     if(tx&&tx.desc){
       var key=merchantKey(tx.desc);
-      if(key)S.merchantMemory={...S.merchantMemory,[key]:cat};
     }
-    S.txns=S.txns.map(t=>t.id===txId?{...t,cat,suggestedCat:undefined}:t);
+    S.txns=S.txns.map(t=>t.id===txId?{...t,cat}:t);
     S.billAssignTxId=null;save();render();
   });
   document.querySelectorAll('[data-cat-bill]').forEach(el=>el.onclick=()=>{
@@ -1510,7 +1451,6 @@ function bind(){
     var loan=S.loans.find(l=>l.id===loanId);
     if(!loan)return;
     var tx=S.txns.find(t=>t.id===txId);
-    if(tx&&tx.desc){var key=merchantKey(tx.desc);if(key)S.merchantMemory={...S.merchantMemory,[key]:'__loan:'+loanId};}
     var payment=Math.abs(tx?tx.amt:0);
     S.loans=S.loans.map(l=>l.id===loanId?{...l,bal:Math.max(0,Math.round((l.bal-payment)*100)/100)}:l);
     S.txns=S.txns.map(t=>t.id===txId?{...t,desc:loan.name+' payment',isLoanPayment:true,loanId,suggestedLoanId:undefined}:t);
@@ -1621,7 +1561,7 @@ function bind(){
     S.disPcs=S.disPcs.concat([pid]);
     // Save immediately (no debounce) so nextDate persists before any reload
     clearTimeout(T);
-    setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,merchantMemory:S.merchantMemory,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate}).catch(e=>console.error(e));
+    setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate}).catch(e=>console.error(e));
     render();
   });
   document.querySelectorAll('[data-pc-skip]').forEach(el=>el.onclick=()=>{S.disPcs=S.disPcs.concat([el.dataset.pcSkip]);render()});
@@ -1820,8 +1760,6 @@ function bind(){
   var importUploadBtn=g('import-upload-btn');if(importUploadBtn)importUploadBtn.onclick=()=>g('import-pdf-input').click();
   var importUploadMoreBtn=g('import-upload-more-btn');if(importUploadMoreBtn)importUploadMoreBtn.onclick=()=>g('import-pdf-input').click();
   var importPdfInput=g('import-pdf-input');if(importPdfInput)importPdfInput.onchange=e=>{var files=Array.from(e.target.files);if(!files.length)return;importStatementPDF(files);};
-  var clearMemBtn=g('clear-memory-btn');if(clearMemBtn)clearMemBtn.onclick=()=>{if(!confirm('Clear all merchant memory? Future imports won\'t have suggestions until you re-categorize.'))return;S.merchantMemory={};save();render();};
-  document.querySelectorAll('[data-del-memory]').forEach(el=>el.onclick=()=>{var k=el.dataset.delMemory;var m={...S.merchantMemory};delete m[k];S.merchantMemory=m;save();render();});
   var envEditOpen=g('env-edit-open');if(envEditOpen)envEditOpen.onclick=()=>{S._editEnvOpen=!S._editEnvOpen;render();if(S._editEnvOpen)setTimeout(()=>{var first=document.querySelector('.env-alloc-inp');if(first)first.focus();},50)};
   var envAllocCancel=g('env-alloc-cancel');if(envAllocCancel)envAllocCancel.onclick=()=>{S._editEnvOpen=false;render();};
   var envInps=document.querySelectorAll('.env-alloc-inp');
@@ -1876,7 +1814,6 @@ function bind(){
   var bulkDone=g('bulk-done-btn');if(bulkDone)bulkDone.onclick=()=>{S.bulkCat=false;render()};
   document.querySelectorAll('[data-bulk-assign]').forEach(el=>el.onclick=()=>{
     var mkey=el.dataset.mkey,catId=el.dataset.cat;
-    if(mkey)S.merchantMemory={...S.merchantMemory,[mkey]:catId};
     S.txns=S.txns.map(t=>{
       if(merchantKey(t.desc)===mkey&&!t.cat&&!t.isBillPayment&&!t.isLoanPayment)return{...t,cat:catId};
       return t;
@@ -2003,7 +1940,6 @@ function bind(){
     }else if(catVal.startsWith('cat:')){
       var catId=catVal.replace('cat:','');
       t.cat=catId;
-      var key2=merchantKey(desc);if(key2)S.merchantMemory={...S.merchantMemory,[key2]:catId};
     }
     S.txns=[t].concat(S.txns);
     adjAcct(acct,fa);
@@ -2099,7 +2035,7 @@ if(shareParam){
 onAuthStateChanged(auth,async user=>{
   U=user;
   if(user){
-    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,merchantMemory:{},bulkCat:false,bulkBillMkey:null,importView:false,importData:null,importParsing:false,importFiles:[]});
+    Object.assign(S,{bal:0,hsa:0,chimeSavingsBal:0,paychecks:[],bills:[],txns:[],cats:null,loans:[],savingsGoals:[],envelopes:{},lastPaycheckDate:'',view:'home',billForm:false,editBill:null,pcForm:false,editPc:null,txForm:false,txType:'expense',txAcct:'chime',catForm:false,editCat:null,loanForm:false,editLoan:null,loanPay:null,filt:'all',filtAcct:'all',filtFrom:'',filtTo:'',disPcs:[],disBills:[],showWithdraw:false,showDeposit:false,savingsDepositGoalId:null,savingsWithdrawGoalId:null,showAllocate:false,allocateGoalId:null,shareToken:null,showSharePanel:false,balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,billAssignTxId:null,editTx:null,goalForm:false,editGoal:null,bulkCat:false,bulkBillMkey:null,importView:false,importData:null,importParsing:false,importFiles:[]});
     document.getElementById('content').innerHTML='<p style="padding:2rem;color:var(--tx2)">Loading your data...</p>';
     startListener();
   }else{
