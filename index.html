@@ -138,10 +138,10 @@ function acctTag(a){var c=a==='hsa'?'var(--tx-info)':a==='chimeSavings'?'var(--t
 
 function spentSince(catId){
   if(!S.lastPaycheckDate)return 0;
-  return S.txns.filter(t=>t.cat===catId&&t.date>=S.lastPaycheckDate&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0);
+  return Math.round(S.txns.filter(t=>t.cat===catId&&t.date>=S.lastPaycheckDate&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0)*100)/100;
 }
 function spentBetween(catId,from,to){
-  return S.txns.filter(t=>t.cat===catId&&t.date>=from&&t.date<to&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0);
+  return Math.round(S.txns.filter(t=>t.cat===catId&&t.date>=from&&t.date<to&&t.amt<0).reduce((s,t)=>s+Math.abs(t.amt),0)*100)/100;
 }
 function prevCycleStart(){
   if(!S.lastPaycheckDate)return null;
