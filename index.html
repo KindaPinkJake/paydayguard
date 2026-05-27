@@ -88,7 +88,7 @@ var S={
   shareToken:null,showSharePanel:false,
   balConfirmedDate:null,savingsConfirmedDate:null,hsaConfirmedDate:null,balSkippedDate:null,
   billAssignTxId:null,editTx:null,pendingBillLog:null,
-  goalForm:false,editGoal:null,editGoalAmt:null,_editEnvOpen:false,
+  goalForm:false,editGoal:null,editGoalAmt:null,_editEnvOpen:false,_editGoalsOpen:false,
 
   bulkCat:false,bulkBillMkey:null,
   importView:false,importData:null,importParsing:false,importFiles:[]
@@ -617,44 +617,31 @@ function savingsCard(){
     <input class="field mono" id="savings-i" type="number" step="0.01" placeholder="Balance" style="margin-top:4px;margin-bottom:6px">
     <button class="btn" id="savings-sb" style="width:100%;font-size:12px;padding:6px">Save</button>
   </div>
-  ${S.savingsGoals.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${unallocated>0?'8':'0'}px">
+  ${S.savingsGoals.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px">
     ${S.savingsGoals.map(g=>{
       var pct=g.target>0?Math.min(1,g.allocated/g.target):0;
-      var isEditing=S.editGoalAmt===g.id;
       return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${isEditing?'8':'4'}px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
           <p style="font-size:13px;font-weight:500">${g.name}</p>
-          <div style="display:flex;align-items:center;gap:8px">
-            ${!isEditing?`<div style="text-align:right">
-              <p class="mono" style="font-size:13px;color:var(--tx-ok)">${fm(g.allocated)}${g.target?` / ${fm(g.target)}`:''}</p>
-            </div>`:''}
-            <button class="btn" data-edit-goal-amt="${g.id}" style="font-size:11px;padding:3px 8px;min-height:0;color:var(--tx2)">${isEditing?'Cancel':'Edit'}</button>
-          </div>
+          ${S._editGoalsOpen
+            ?`<input class="field mono goal-alloc-inp" data-goal-id="${g.id}" type="number" step="0.01" min="0" value="${g.allocated.toFixed(2)}" style="width:110px;text-align:right;padding:4px 8px;font-size:13px">`
+            :`<p class="mono" style="font-size:13px;color:var(--tx-ok)">${fm(g.allocated)}${g.target?` / ${fm(g.target)}`:''}</p>`}
         </div>
-        ${isEditing?`<div style="display:flex;gap:6px">
-          <input class="field mono" id="goal-amt-inp-${g.id}" type="number" step="0.01" min="0" value="${g.allocated}" style="flex:1;font-size:13px">
-          <button class="btn" data-save-goal-amt="${g.id}" style="font-size:12px;padding:5px 12px;color:var(--tx-ok);border-color:var(--bd-ok)">Save</button>
-        </div>`:''}
-        ${g.target>0&&!isEditing?`<div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-bottom:3px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% • ${fm(Math.max(0,g.target-g.allocated))} to go</p>`:''}
+        ${g.target>0&&!S._editGoalsOpen?`<div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-bottom:3px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${Math.round(pct*100)}%"></div></div><p style="font-size:11px;color:var(--tx2)">${Math.round(pct*100)}% • ${fm(Math.max(0,g.target-g.allocated))} to go</p>`:''}
       </div>`;
     }).join('')}
-  </div>`:''}
-  ${unallocated>0||unallocated<0?`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;${unallocated<0?'border:1px solid var(--bd-err)':''}">
-    <div><p style="font-size:12px;color:${unallocated<0?'var(--tx-err)':'var(--tx2)'}">${unallocated<0?'⚠ Over-allocated by':'Unallocated'}</p><p class="mono" style="font-size:14px;font-weight:500;color:${unallocated<0?'var(--tx-err)':'var(--tx)'}">${fm(Math.abs(unallocated))}</p></div>
-    ${unallocated>0&&S.savingsGoals.length?`<button class="btn" id="savings-allocate-btn" style="font-size:11px;padding:4px 10px;color:var(--tx-ok);border-color:var(--bd-ok)">Move to goal →</button>`:''}
   </div>
-  ${S.showAllocate?`<div style="margin-bottom:8px;padding:12px;background:var(--bg2);border-radius:8px">
-    <label style="margin-bottom:6px">Amount to move</label>
-    <input class="field mono" id="allocate-amt-inp" type="number" step="0.01" min="0.01" max="${unallocated}" placeholder="0.00" style="margin-bottom:8px">
-    <label style="margin-bottom:6px">Move to which goal?</label>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-      ${S.savingsGoals.map(g=>`<button data-allocate-goal="${g.id}" class="btn" style="text-align:left;font-size:13px;padding:8px 12px;display:flex;justify-content:space-between;${S.allocateGoalId===g.id?'border-color:var(--tx-ok);background:var(--bg-ok);color:var(--tx-ok)':''}"><span>${g.name}</span><span class="mono" style="font-size:12px;color:var(--tx2)">${fm(g.allocated)}</span></button>`).join('')}
+  ${S._editGoalsOpen?`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg2);border-radius:8px;border:1px solid var(--bd);margin-top:4px">
+    <p style="font-size:12px;color:var(--tx2)">Total: <span class="mono goal-alloc-total" style="font-weight:600">${fm(S.savingsGoals.reduce((s,g)=>s+g.allocated,0))}</span> of ${fm(savBal)} <span class="goal-alloc-warning" style="display:none;color:var(--tx-err);font-size:11px"></span></p>
+    <div style="display:flex;gap:6px">
+      <button id="goal-alloc-save" class="btn" style="font-size:12px;padding:5px 12px;min-height:0;color:var(--tx-ok);border-color:var(--bd-ok);font-weight:500">Save</button>
+      <button id="goal-alloc-cancel" class="btn" style="font-size:12px;padding:5px 12px;min-height:0">Cancel</button>
     </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn" id="allocate-save" style="flex:1;font-weight:500;color:var(--tx-ok);border-color:var(--bd-ok)">Move</button>
-      <button class="btn" id="allocate-cancel" style="flex:1">Cancel</button>
-    </div>
-  </div>`:''}`:''}
+  </div>`:''}
+  <button id="goal-edit-open" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--tx2);padding:2px 0;margin-top:4px;margin-bottom:4px;display:block">${S._editGoalsOpen?'Cancel editing':'✎ Edit goal amounts'}</button>`:''}
+  ${unallocated>0||unallocated<0?`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:8px;border:${unallocated<0?'1px solid var(--bd-err)':'none'}">
+    <p style="font-size:12px;color:${unallocated<0?'var(--tx-err)':'var(--tx2)'}">${unallocated<0?'⚠ Over-allocated by':'Unallocated'}: <span class="mono" style="font-weight:500;color:${unallocated<0?'var(--tx-err)':'var(--tx)'}">${fm(Math.abs(unallocated))}</span></p>
+  </div>`:''}
   ${depositForm}${withdrawForm}
   </div>`;
 }
@@ -1592,23 +1579,23 @@ function bind(){
       save();render();
     }
   };
-  document.querySelectorAll('[data-edit-goal-amt]').forEach(el=>el.onclick=()=>{
-    var gid=el.dataset.editGoalAmt;
-    S.editGoalAmt=S.editGoalAmt===gid?null:gid;
-    render();
-  });
-  document.querySelectorAll('[data-save-goal-amt]').forEach(el=>el.onclick=()=>{
-    var gid=el.dataset.saveGoalAmt;
-    var inp=g('goal-amt-inp-'+gid);
-    var v=parseFloat(inp?inp.value:0);
-    if(isNaN(v)||v<0)return;
-    S.savingsGoals=S.savingsGoals.map(g=>g.id===gid?{...g,allocated:Math.round(v*100)/100}:g);
-    // Auto-update chimeSavingsBal to match sum of goals if it would be less
-    var newTotal=S.savingsGoals.reduce((s,g)=>s+g.allocated,0);
-    if(newTotal>S.chimeSavingsBal)S.chimeSavingsBal=Math.round(newTotal*100)/100;
-    S.editGoalAmt=null;
-    save();render();
-  });
+  var goalEditOpen=g('goal-edit-open');if(goalEditOpen)goalEditOpen.onclick=()=>{S._editGoalsOpen=!S._editGoalsOpen;render();if(S._editGoalsOpen)setTimeout(()=>{var f=document.querySelector('.goal-alloc-inp');if(f)f.focus();},50);};
+  var goalAllocCancel=g('goal-alloc-cancel');if(goalAllocCancel)goalAllocCancel.onclick=()=>{S._editGoalsOpen=false;render();};
+  var goalInps=document.querySelectorAll('.goal-alloc-inp');
+  var goalTotal=document.querySelector('.goal-alloc-total');
+  var goalWarn=document.querySelector('.goal-alloc-warning');
+  var savBal=S.chimeSavingsBal;
+  function updateGoalTotal(){
+    var sum=0;goalInps.forEach(inp=>{sum=Math.round((sum+(parseFloat(inp.value)||0))*100)/100;});
+    if(goalTotal){goalTotal.textContent=fm(sum);var off=Math.abs(sum-savBal)>0.02;goalTotal.style.color=off?'var(--tx-err)':'var(--tx-ok)';if(goalWarn){goalWarn.style.display=off?'inline':'none';if(off)goalWarn.textContent=' — must equal '+fm(savBal);}}
+  }
+  goalInps.forEach(inp=>inp.oninput=updateGoalTotal);
+  var goalAllocSave=g('goal-alloc-save');if(goalAllocSave)goalAllocSave.onclick=()=>{
+    var newGoals=S.savingsGoals.map(g=>{var inp=document.querySelector('[data-goal-id="'+g.id+'"]');var v=Math.round((parseFloat(inp?inp.value:g.allocated)||0)*100)/100;return{...g,allocated:v};});
+    var total=Math.round(newGoals.reduce((s,g)=>s+g.allocated,0)*100)/100;
+    if(Math.abs(total-savBal)>0.02){if(goalWarn){goalWarn.style.display='inline';goalWarn.textContent=' — must equal '+fm(savBal);}return;}
+    S.savingsGoals=newGoals;S._editGoalsOpen=false;save();render();
+  };
   var sdb=g('savings-deposit-btn');if(sdb)sdb.onclick=()=>{S.showDeposit=true;S.showWithdraw=false;S.savingsDepositGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
   var swb=g('savings-withdraw-btn');if(swb)swb.onclick=()=>{S.showWithdraw=true;S.showDeposit=false;S.savingsWithdrawGoalId=S.savingsGoals.length===1?S.savingsGoals[0].id:null;render()};
   document.querySelectorAll('[data-deposit-goal]').forEach(el=>el.onclick=()=>{S.savingsDepositGoalId=el.dataset.depositGoal;render()});
