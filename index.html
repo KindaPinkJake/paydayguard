@@ -273,8 +273,12 @@ function pcsToday(){
 }
 function billsDue(){
   var t=tod();
+  var since=S.lastPaycheckDate||t;
   var dueBills=S.bills.filter(b=>b.nextDue<=t&&!isBillPaid(b.id)&&!S.disBills.includes(b.id)).map(b=>({...b,_type:'bill'}));
-  var dueLoans=S.loans.filter(l=>l.nextDue&&l.nextDue<=t&&l.bal>0&&!S.disBills.includes('loan:'+l.id)).map(l=>({...l,_type:'loan',amt:l.payment||0}));
+  var dueLoans=S.loans.filter(l=>{
+    if(!l.nextDue||l.nextDue>t||!l.bal>0||S.disBills.includes('loan:'+l.id))return false;
+    return!S.txns.some(tx=>tx.isLoanPayment&&tx.loanId===l.id&&tx.date>=since);
+  }).map(l=>({...l,_type:'loan',amt:l.payment||0}));
   return dueBills.concat(dueLoans).sort((a,b)=>a.nextDue.localeCompare(b.nextDue));
 }
 
@@ -1902,7 +1906,7 @@ function bind(){
         S.loans=S.loans.map(l=>{
           if(l.id!==loanId)return l;
           var updated={...l,bal:Math.max(0,Math.round((l.bal-Math.abs(fa))*100)/100)};
-          if(l.nextDue&&date>=l.nextDue){
+          if(l.nextDue){
             var nd=new Date(l.nextDue+'T00:00:00');
             if(l.freq==='weekly')nd.setDate(nd.getDate()+7);
             else if(l.freq==='biweekly')nd.setDate(nd.getDate()+14);
