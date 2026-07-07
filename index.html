@@ -954,7 +954,10 @@ function billsView(){
 
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <p style="font-size:14px;font-weight:500">Recurring bills</p>
-    <button class="btn" id="addBillBtn" style="font-size:13px;padding:6px 12px">+ Add bill</button>
+    <div style="display:flex;gap:6px">
+      ${S.bills.some(b=>b.nextDue<tod())?`<button class="btn" id="advanceOverdueBtn" style="font-size:12px;padding:5px 10px;color:var(--tx-warn);border-color:var(--bd-warn)">⏩ Catch up bills</button>`:''}
+      <button class="btn" id="addBillBtn" style="font-size:13px;padding:6px 12px">+ Add bill</button>
+    </div>
   </div>
   ${S.billForm?billForm():''}
   ${!S.bills.length&&!S.billForm?'<div style="text-align:center;padding:1.5rem;color:var(--tx2);font-size:14px;border:1px dashed var(--bd);border-radius:12px;margin-bottom:12px">No bills yet.</div>':''}
@@ -1716,6 +1719,16 @@ function bind(){
   };
   var lfc=g('lfCancel');if(lfc)lfc.onclick=()=>{S.loanForm=false;S.editLoan=null;render()};
 
+  var advOverdueBtn=g('advanceOverdueBtn');if(advOverdueBtn)advOverdueBtn.onclick=()=>{
+    var t=tod();var count=0;
+    S.bills=S.bills.map(b=>{
+      if(b.nextDue>=t)return b;
+      var updated={...b};
+      while(updated.nextDue<t)updated={...updated,nextDue:adv(updated)};
+      count++;return updated;
+    });
+    if(count>0){save();render();alert(count+' bill'+(count>1?'s':'')+' advanced to next upcoming date.');}
+  };
   var abb=g('addBillBtn');if(abb)abb.onclick=()=>{S.billForm=true;S.editBill=null;render()};
   document.querySelectorAll('[data-eb]').forEach(el=>el.onclick=()=>{S.editBill=el.dataset.eb;S.billForm=true;render()});
   document.querySelectorAll('[data-delb]').forEach(el=>el.onclick=()=>{S.bills=S.bills.filter(b=>b.id!==el.dataset.delb);save();render()});
