@@ -412,7 +412,6 @@ function isSavingsTransfer(desc){
 }
 
 function needsBalanceConfirm(){
- return[];
   var today=tod();
   if(S.balSkippedDate===today)return[];
   var accounts=[];
@@ -956,7 +955,7 @@ function billsView(){
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <p style="font-size:14px;font-weight:500">Recurring bills</p>
     <div style="display:flex;gap:6px">
-      ${S.bills.some(b=>b.nextDue<tod())?`<button class="btn" id="advanceOverdueBtn" style="font-size:12px;padding:5px 10px;color:var(--tx-warn);border-color:var(--bd-warn)">⏩ Catch up bills</button>`:''}
+      ${(S.bills.some(b=>b.nextDue<tod())||S.loans.some(l=>l.nextDue&&l.nextDue<tod()))?`<button class="btn" id="advanceOverdueBtn" style="font-size:12px;padding:5px 10px;color:var(--tx-warn);border-color:var(--bd-warn)">⏩ Catch up</button>`:''}
       <button class="btn" id="addBillBtn" style="font-size:13px;padding:6px 12px">+ Add bill</button>
     </div>
   </div>
@@ -998,7 +997,39 @@ function billForm(){
 }
 
 function loanMgr(){
-  return`<div style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><p style="font-size:14px;font-weight:500">Loans</p><button class="btn" id="addLoanBtn" style="font-size:13px;padding:6px 12px">+ Add loan</button></div>${S.loanForm?loanForm():''}${!S.loans.length&&!S.loanForm?'<div style="text-align:center;padding:1.5rem;color:var(--tx2);font-size:14px;border:1px dashed var(--bd);border-radius:12px">No loans tracked yet.</div>':''}<div style="display:flex;flex-direction:column;gap:8px">${S.loans.map(l=>{var pct=Math.max(0,Math.min(100,Math.round((1-l.bal/l.orig)*100)));return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div><p style="font-size:15px;font-weight:500;margin-bottom:2px">${l.name}</p><p style="font-size:12px;color:var(--tx2)">Original: ${fm(l.orig)}</p></div><p class="mono" style="font-size:18px;font-weight:500;color:var(--tx-err)">${fm(l.bal)}</p></div><div style="height:6px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:4px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${pct}%"></div></div><div style="display:flex;justify-content:space-between;align-items:center"><p style="font-size:11px;color:var(--tx2)">${pct}% paid off</p><div style="display:flex;gap:6px"><button class="btn" data-el="${l.id}" style="font-size:12px;padding:4px 10px">Edit</button><button class="btn" data-dell="${l.id}" style="font-size:12px;padding:4px 10px;color:var(--tx-err)">Delete</button></div></div></div>`}).join('')}</div></div>`;
+  return`<div style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <p style="font-size:14px;font-weight:500">Loans</p>
+      <button class="btn" id="addLoanBtn" style="font-size:13px;padding:6px 12px">+ Add loan</button>
+    </div>
+    ${S.loanForm?loanForm():''}
+    ${!S.loans.length&&!S.loanForm?'<div style="text-align:center;padding:1.5rem;color:var(--tx2);font-size:14px;border:1px dashed var(--bd);border-radius:12px">No loans tracked yet.</div>':''}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${S.loans.map(l=>{
+        var pct=Math.max(0,Math.min(100,Math.round((1-l.bal/l.orig)*100)));
+        var overdue=l.nextDue&&l.nextDue<tod();
+        return`<div style="background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px 16px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <div><p style="font-size:15px;font-weight:500;margin-bottom:2px">${l.name}</p>
+            <p style="font-size:12px;color:var(--tx2)">Original: ${fm(l.orig)}</p></div>
+            <p class="mono" style="font-size:18px;font-weight:500;color:var(--tx-err)">${fm(l.bal)}</p>
+          </div>
+          <div style="height:6px;border-radius:4px;background:var(--bg2);overflow:hidden;margin-bottom:8px"><div style="height:100%;border-radius:4px;background:var(--tx-ok);width:${pct}%"></div></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <p style="font-size:11px;color:var(--tx2)">${pct}% paid off</p>
+            <div style="text-align:right">
+              ${l.payment?`<p style="font-size:12px;color:var(--tx2)">Payment: <span class="mono" style="color:var(--tx)">${fm(l.payment)}</span></p>`:''}
+              ${l.nextDue?`<p style="font-size:12px;color:${overdue?'var(--tx-warn)':'var(--tx2)'}">Next due: <span style="font-weight:500">${fd(l.nextDue)}${overdue?' ⚠':''}</span></p>`:''}
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:6px">
+            <button class="btn" data-el="${l.id}" style="font-size:12px;padding:4px 10px">Edit</button>
+            <button class="btn" data-dell="${l.id}" style="font-size:12px;padding:4px 10px;color:var(--tx-err)">Delete</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
 function loanForm(){
   var f=S.editLoan?S.loans.find(l=>l.id===S.editLoan)||{}:{};
@@ -1728,7 +1759,19 @@ function bind(){
       while(updated.nextDue<t)updated={...updated,nextDue:adv(updated)};
       count++;return updated;
     });
-    if(count>0){save();render();alert(count+' bill'+(count>1?'s':'')+' advanced to next upcoming date.');}
+    S.loans=S.loans.map(l=>{
+      if(!l.nextDue||l.nextDue>=t)return l;
+      var updated={...l};
+      while(updated.nextDue<t){
+        var nd=new Date(updated.nextDue+'T00:00:00');
+        if(updated.freq==='weekly')nd.setDate(nd.getDate()+7);
+        else if(updated.freq==='biweekly')nd.setDate(nd.getDate()+14);
+        else nd.setMonth(nd.getMonth()+1);
+        updated={...updated,nextDue:nd.toISOString().slice(0,10)};
+      }
+      count++;return updated;
+    });
+    if(count>0){save();render();alert(count+' bill'+(count>1?'s/loans':'/loan')+' advanced to next upcoming date.');}
   };
   var abb=g('addBillBtn');if(abb)abb.onclick=()=>{S.billForm=true;S.editBill=null;render()};
   document.querySelectorAll('[data-eb]').forEach(el=>el.onclick=()=>{S.editBill=el.dataset.eb;S.billForm=true;render()});
