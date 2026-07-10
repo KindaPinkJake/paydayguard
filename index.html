@@ -140,29 +140,10 @@ function spentSince(catId){
   if(!S.lastPaycheckDate)return 0;
   return Math.round(S.txns.filter(t=>t.cat===catId&&t.date>=S.lastPaycheckDate&&t.amt<0&&(t.account||'chime')==='chime').reduce((s,t)=>s+Math.abs(t.amt),0)*100)/100;
 }
-function spentBetween(catId,from,to){
-  return Math.round(S.txns.filter(t=>t.cat===catId&&t.date>=from&&t.date<to&&t.amt<0&&(t.account||'chime')==='chime').reduce((s,t)=>s+Math.abs(t.amt),0)*100)/100;
-}
-function prevCycleStart(){
-  if(!S.lastPaycheckDate)return null;
-  var pcWords=S.paychecks.filter(p=>p.account==='chime').flatMap(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
-  if(!pcWords.length)return null;
-  var prev=S.txns.filter(t=>t.txType==='income'&&t.account==='chime'&&t.date<S.lastPaycheckDate&&pcWords.some(w=>(t.desc||'').toLowerCase().includes(w))).sort((a,b)=>b.date.localeCompare(a.date));
-  return prev.length?prev[0].date:null;
-}
 function isBillPaid(billId){
   // Check for a bill payment transaction since the most recent paycheck OR in the last 60 days
   var since=S.lastPaycheckDate||new Date(Date.now()-60*86400000).toISOString().slice(0,10);
   return S.txns.some(t=>t.isBillPayment&&t.billId===billId&&t.date>=since);
-}
-function savingsRate(){
-  if(!S.lastPaycheckDate)return null;
-  var income=S.txns.filter(t=>t.txType==='income'&&t.account==='chime'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+t.amt,0);
-  if(income<=0)return null;
-  // Savings = money deliberately moved to savings (auto-transfer from paycheck + manual deposits)
-  var saved=S.txns.filter(t=>t.txType==='savings_transfer'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+Math.abs(t.amt),0)
-    +S.txns.filter(t=>t.txType==='savings_deposit'&&t.date>=S.lastPaycheckDate).reduce((s,t)=>s+Math.abs(t.amt),0);
-  return Math.max(0,Math.round(saved/income*100));
 }
 function paycheckHistory(){
   var pcWords=S.paychecks.filter(p=>p.account==='chime').flatMap(p=>p.name.toLowerCase().split(/\s+/).filter(w=>w.length>2));
@@ -688,7 +669,6 @@ function combinedSpendCard(sf,up,tot){
   var cats=gc();
   var dy=days();
   var pd=getPayday();
-  var prev=prevCycleStart();
   var hasBudgets=budgetsConfigured()&&pd;
   var heroLevel=showLevel(sf);
   var heroSt=ls(heroLevel);
@@ -711,14 +691,11 @@ function combinedSpendCard(sf,up,tot){
       var dotC=co(c.color).c;
       var amtC=over?'var(--tx-err)':rem<alloc*0.15?'var(--tx-err)':rem<alloc*0.35?'var(--tx-warn)':'var(--tx)';
       var bC=over?'var(--tx-err)':barColor(spent,alloc);
-      var prevSpent=prev?spentBetween(c.id,prev,S.lastPaycheckDate):null;
-      var trend='';
-      if(prevSpent!==null&&prevSpent>0){var diff=spent-prevSpent;trend=`<span style="font-size:10px;color:${diff<0?'var(--tx-ok)':diff>0?'var(--tx-err)':'var(--tx2)'};margin-left:4px">${diff<0?'↓':'↑'}${Math.round(Math.abs(diff)/prevSpent*100)}%</span>`;}
       var isEditing=S._editEnvOpen;
       return`<div style="background:var(--bg);border-radius:10px;padding:11px 14px;border:1px solid ${over?'var(--bd-err)':'var(--bd)'}" ${over?`data-rebalance-from="${c.id}"`:''}>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
           <div style="width:8px;height:8px;border-radius:50%;background:${dotC};flex-shrink:0"></div>
-          <p style="font-size:12px;color:var(--tx2);font-weight:500">${c.label}${over?` <span style="font-size:9px;font-weight:700;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}${trend}</p>
+          <p style="font-size:12px;color:var(--tx2);font-weight:500">${c.label}${over?` <span style="font-size:9px;font-weight:700;color:var(--tx-err);background:var(--bg-err);padding:1px 5px;border-radius:4px">OVER</span>`:''}</p>
         </div>
         ${isEditing
           ?`<input class="field mono env-alloc-inp" data-env-cat="${c.id}" type="number" step="0.01" value="${alloc.toFixed(2)}" style="width:100%;text-align:right;padding:5px 10px;font-size:15px;margin-bottom:6px">`
