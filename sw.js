@@ -1,4 +1,4 @@
-const CACHE='paydayguard-v4';
+const CACHE='paydayguard-v5';
 const SHELL=['/paydayguard/','/paydayguard/index.html','/paydayguard/manifest.json'];
 
 self.addEventListener('install',e=>{
@@ -41,6 +41,33 @@ self.addEventListener('fetch',e=>{
         }
         return res;
       }).catch(()=>caches.match('./'));
+    })
+  );
+});
+
+// ==== Push notifications ====
+// Receives a push message from the Cloud Function and draws the notification,
+// even when the app isn't open.
+self.addEventListener('push',e=>{
+  let data={};
+  try{data=e.data?e.data.json():{};}catch(_){data={body:e.data&&e.data.text()};}
+  const title=data.title||'PaydayGuard';
+  const options={
+    body:data.body||'Open PaydayGuard',
+    tag:'paydayguard-daily', // replaces yesterday's instead of stacking
+    renotify:true
+  };
+  e.waitUntil(self.registration.showNotification(title,options));
+});
+
+// Tapping the notification focuses the app if open, else opens it.
+self.addEventListener('notificationclick',e=>{
+  e.notification.close();
+  const target=self.registration.scope;
+  e.waitUntil(
+    self.clients.matchAll({type:'window',includeUncontrolled:true}).then(list=>{
+      for(const c of list){if('focus'in c)return c.focus();}
+      if(self.clients.openWindow)return self.clients.openWindow(target);
     })
   );
 });
