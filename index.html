@@ -207,9 +207,48 @@ function save(){
   if(!S.txns.length&&!S.bills.length&&!S.paychecks.length&&!S.bal&&!S._dataLoaded)return;
   var b=document.getElementById('sync-bar');if(b)b.classList.add('show');
   clearTimeout(T);T=setTimeout(async()=>{
-    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate})}catch(e){console.error(e)}
+    try{await setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate,pushSummary:buildPushSummary()})}catch(e){console.error(e)}
     if(b)b.classList.remove('show');
   },800);
+}
+
+// ---- Push notifications ----
+// Public VAPID key. Safe to expose. Generate with: npx web-push generate-vapid-keys
+// Replace this placeholder with your generated PUBLIC key before deploying.
+var VAPID_PUBLIC='BETdi2m8T67aFr496-xXYHtfXuQy6b_Xdaf2vu_9Cj5PSikp-nSExt5zT7HeARFFWHNpEkNC8dEymjYqsRpuUXo';
+
+function buildPushSummary(){
+  var cats=gc().filter(c=>c.budgetPct>0).map(c=>({
+    label:c.label,
+    remaining:Math.round(((S.envelopes[c.id]||0)-spentSince(c.id))*100)/100,
+    allocated:Math.round((S.envelopes[c.id]||0)*100)/100
+  }));
+  return{safeToSpend:Math.round(safe()*100)/100,daysLeft:days(),payday:getPayday()||null,categories:cats,updatedAt:Date.now()};
+}
+function urlB64ToUint8Array(s){
+  var pad='='.repeat((4-s.length%4)%4);
+  var b64=(s+pad).replace(/-/g,'+').replace(/_/g,'/');
+  var raw=atob(b64),arr=new Uint8Array(raw.length);
+  for(var i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i);
+  return arr;
+}
+function subId(endpoint){var h=0;for(var i=0;i<endpoint.length;i++)h=(Math.imul(31,h)+endpoint.charCodeAt(i))|0;return'sub_'+(h>>>0).toString(36);}
+async function enablePush(){
+  if(!('serviceWorker'in navigator)||!('PushManager'in window)){alert('Push notifications aren\u2019t supported in this browser.');return;}
+  if(!U){alert('Sign in first.');return;}
+  if(VAPID_PUBLIC.indexOf('REPLACE_WITH')===0){alert('Push isn\u2019t configured yet \u2014 VAPID key missing.');return;}
+  try{
+    var perm=await Notification.requestPermission();
+    if(perm!=='granted'){alert('Notifications are blocked. Enable them for this site in your browser settings, then try again.');return;}
+    var reg=await navigator.serviceWorker.ready;
+    var sub=await reg.pushManager.getSubscription();
+    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64ToUint8Array(VAPID_PUBLIC)});
+    var raw=sub.toJSON();
+    await setDoc(doc(db,'users',U.uid,'pushSubscriptions',subId(raw.endpoint)),{endpoint:raw.endpoint,keys:raw.keys,ua:navigator.userAgent,createdAt:Date.now()});
+    await setDoc(doc(db,'users',U.uid,'data','main'),{pushSummary:buildPushSummary()},{merge:true});
+    S.pushEnabled=true;render();
+    alert('Daily notifications on. You\u2019ll get your safe-to-spend summary each morning on this device.');
+  }catch(e){console.error(e);alert('Could not enable notifications: '+(e&&e.message||e));}
 }
 
 async function createShare(){
@@ -747,6 +786,7 @@ function homeView(){
     <div style="display:flex;align-items:center;gap:4px">
       ${pd?`<span style="font-size:12px;color:var(--tx2);background:var(--bg);padding:4px 10px;border-radius:8px;border:1px solid var(--bd)">${fd(pd)}</span>`:''}
       <button id="soBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:16px;padding:6px" title="Sign out">⎋</button>
+      <button id="pushBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:16px;padding:6px" title="Daily notifications">${(typeof Notification!=='undefined'&&Notification.permission==='granted')?'🔔':'🔕'}</button>
       <button id="shareBtn" style="background:none;border:none;cursor:pointer;color:var(--tx2);font-size:16px;padding:6px" title="Share">🔗</button>
     </div>
   </div>
@@ -1392,6 +1432,7 @@ function bind(){
   var g=i=>document.getElementById(i);
   document.querySelectorAll('[data-nav]').forEach(el=>{el.onclick=()=>{S.view=el.dataset.nav;S.billForm=false;S.txForm=false;S.pcForm=false;S.editPc=null;S.catForm=false;S.editCat=null;S.loanForm=false;S.editLoan=null;S.loanPay=null;S.showWithdraw=false;S.showDeposit=false;S.showSharePanel=false;S.editTx=null;S.goalForm=false;S.editGoal=null;S._editEnvOpen=false;S._editGoalsOpen=false;S.filt='all';S.filtAcct='all';S.filtFrom='';S.filtTo='';S.bulkCat=false;S.bulkBillMkey=null;S.importView=false;S.importData=null;S.importFiles=[];S.billAssignTxId=null;S.loanAssignTxId=null;render()}});
   var soBtn=g('soBtn');if(soBtn)soBtn.onclick=()=>{if(confirm('Sign out?'))signOut(auth)};
+  var pushBtn=g('pushBtn');if(pushBtn)pushBtn.onclick=enablePush;
   var shareBtn=g('shareBtn');if(shareBtn)shareBtn.onclick=()=>{S.showSharePanel=!S.showSharePanel;render()};
   var scb=g('share-create-btn');if(scb)scb.onclick=async()=>{scb.textContent='Generating...';scb.disabled=true;await createShare();render()};
   var copyBtn=g('share-copy-btn');if(copyBtn)copyBtn.onclick=()=>{var inp=g('share-url-inp');if(inp){navigator.clipboard.writeText(inp.value).then(()=>{copyBtn.textContent='Copied!';setTimeout(()=>{copyBtn.textContent='Copy'},2000)})}};
@@ -1563,7 +1604,7 @@ function bind(){
     S.disPcs=S.disPcs.concat([pid]);
     // Save immediately (no debounce) so nextDate persists before any reload
     clearTimeout(T);
-    setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate}).catch(e=>console.error(e));
+    setDoc(doc(db,'users',U.uid,'data','main'),{bal:S.bal,hsa:S.hsa,chimeSavingsBal:S.chimeSavingsBal,paychecks:S.paychecks,bills:S.bills,txns:S.txns,cats:S.cats,loans:S.loans,savingsGoals:S.savingsGoals,envelopes:S.envelopes,lastPaycheckDate:S.lastPaycheckDate,shareToken:S.shareToken,balConfirmedDate:S.balConfirmedDate,savingsConfirmedDate:S.savingsConfirmedDate,hsaConfirmedDate:S.hsaConfirmedDate,balSkippedDate:S.balSkippedDate,pushSummary:buildPushSummary()}).catch(e=>console.error(e));
     render();
   });
   document.querySelectorAll('[data-pc-skip]').forEach(el=>el.onclick=()=>{S.disPcs=S.disPcs.concat([el.dataset.pcSkip]);render()});
