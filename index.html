@@ -613,6 +613,7 @@ function savingsCard(){
         <button class="btn" id="savings-eb" style="font-size:12px;padding:5px 10px;flex:1">Edit</button>
         <button class="btn" id="savings-deposit-btn" style="font-size:12px;padding:5px 10px;flex:1">+ Log</button>
         <button class="btn" id="savings-withdraw-btn" style="font-size:12px;padding:5px 10px;flex:1">Withdraw</button>
+        <button class="btn" id="savings-cfm" style="font-size:12px;padding:5px 10px;flex:1;color:var(--tx-ok);border-color:var(--bd-ok)">✓ Confirm</button>
       </div>
     </div>
   </div>
@@ -1606,6 +1607,7 @@ function bind(){
     S.disBills=S.disBills.concat([el.dataset.billSkip]);render();
   });
 
+  var savingsCfm=g('savings-cfm');if(savingsCfm)savingsCfm.onclick=()=>{S.savingsConfirmedDate=tod();save();render();};
   var seb=g('savings-eb');if(seb)seb.onclick=()=>{var f=g('savings-f'),i=g('savings-i');if(!f)return;var show=f.style.display!=='none';f.style.display=show?'none':'block';if(!show&&i){i.value=S.chimeSavingsBal;i.focus();}};
   var ssb=g('savings-sb');if(ssb)ssb.onclick=()=>{
     var v=parseFloat(g('savings-i').value);if(!isNaN(v)){
