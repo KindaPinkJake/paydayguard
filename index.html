@@ -412,6 +412,7 @@ function isSavingsTransfer(desc){
 }
 
 function needsBalanceConfirm(){
+ return[];
   var today=tod();
   if(S.balSkippedDate===today)return[];
   var accounts=[];
